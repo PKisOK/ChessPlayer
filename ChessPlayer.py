@@ -1,4 +1,5 @@
-#
+
+ #
 #   Program to manually control Rajan's CNC using USB port
 #   while view video from the RPi camera mounted in the CNC arm
 #   and turning on and off the electromagnet using GPIO port to
@@ -139,8 +140,9 @@ def board_analysis(image,xscal):
 def calibrate_board(image,xscal,x0,y0,z0):
 #
 #   Function does the following
-#       Find calibration marks to calculate image scales and offsets
+#       
 #       Analyze chess board image to physical locations of each square
+#       determine image rows/cols to physical distances and x/y scale factor
 #
 
     (rows,cols) = image.shape
@@ -250,7 +252,7 @@ def calibrate_board(image,xscal,x0,y0,z0):
     ly = np.uint16(marks[0,0] + (mark1_y_distance_to_zero - box) / row_inches)
     hx = np.uint16(marks[0,1] + (mark1_x_distance_to_zero + box) / col_inches)
     hy = np.uint16(marks[0,0] + (mark1_y_distance_to_zero + box) / row_inches)
-
+ 
     crop_img = np.copy(image[ly:hy,lx:hx])
     crop_img = (crop_img - np.min(crop_img))/(np.max(crop_img) - np.min(crop_img))           
     crop_row,crop_col = crop_img.shape
@@ -291,7 +293,7 @@ def calibrate_board(image,xscal,x0,y0,z0):
     
         plt.show()
         
-    #b_b = input("Board border width ("+str(board_border)+") :")
+    #b_b = input("Board  border width ("+str(board_border)+") :")
     #if (b_b >0) : board_border  = b_b
            
     lx = np.uint16(round(zero_location_col+(zero_delta_x_to_h1sq-board_border)/col_inches,0))
@@ -394,16 +396,20 @@ def calibrate_board(image,xscal,x0,y0,z0):
     A8_boardcorner_row = min(ranks_y_location)
     H1_boardcorner_col = min(ranks_x_location)
     H1_boardcorner_row = max(ranks_y_location)
-
+    col_inches = no_xsqs*sq_xd/(A8_boardcorner_col-H1_boardcorner_col)
+    row_inches = no_ysqs*sq_yd/(H1_boardcorner_row-A8_boardcorner_row)
+    xscal = col_inches / row_inches
     
     print 'Board Corners : ',H1_boardcorner_col,',',H1_boardcorner_row,',',A8_boardcorner_col,',',A8_boardcorner_row
-    print 'col_inches : ',no_xsqs*sq_xd/(A8_boardcorner_col-H1_boardcorner_col)
-    print 'row_inches : ',no_ysqs*sq_yd/(H1_boardcorner_row-A8_boardcorner_row)
+    print 'col_inches : ', col_inches
+    print 'row_inches : ', row_inches
+    print 'xscal : ', xscal
 
     board_img = np.copy(image)
     board_img[A8_boardcorner_row:H1_boardcorner_row,H1_boardcorner_col:A8_boardcorner_col]=0.0
     board_img[ranks_y_location,:] = 1.0
     board_img[:,ranks_x_location] = 1.0
+ 
     
     plt.imshow(board_img, aspect='equal', extent=[0,cols*xscal,0,rows], cmap='gray')
     plt.show()
@@ -432,7 +438,7 @@ def absolute_coordinate_moves() :
 
     strin = raw_input (prompt);
     while (strin.lower() != "q"):    
-        if (strin.lower() == "x") :
+        if (strin.lower() == "x") : 
             xloc = input('Enter in X coordinate : (' + repr(round(loc_pre[0],2)) + '->' + repr(round(loc_cur[0],2)) + ') ')
             if xloc > x_limits[1] :
                 xloc = x_limits[1]
@@ -448,7 +454,7 @@ def absolute_coordinate_moves() :
                 value = value - x_backlash[1]
                 print 'Backlash correction applied'
             GRBLvalue = round(-value/x_scale,2)
-            print 'GRBL value = ',repr(GRBLvalue)
+            print 'GRBL value = ',repr(GRBLvalue) 
             ser.write('G91 G0 X'+repr(GRBLvalue)+'\r\n')
             reply = ser.readline()
             print 'CNC Reply back: ',reply,
@@ -511,7 +517,7 @@ def absolute_coordinate_moves() :
 #
 #   To Run program in diagnostics mode set to True
 #
-Eng_mode = False
+Eng_mode = True
 Talk_mode = False
 
 
