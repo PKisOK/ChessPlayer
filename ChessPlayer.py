@@ -154,171 +154,16 @@ def calibrate_board(image,xscal,x0,y0,z0):
     sq_xd = 1.5
     sq_yd = 1.5 + 1.0/16.0/8
     board_border = 0.20
-#       Relative distances of marks and zero references in inches
-#       Zero reference is located at the lower right hand corner of h1 chess square
-    mark1_to_mark2_distance =  8.0 + 13.0/16.0
-    mark2_to_mark3_distance = 16.0 
-    mark1_to_mark3_distance = 18.0 +  5.0/16.0
-    mark1_to_zero_ref       =  2.0 +  7.0/16.0
-    mark3_to_zero_ref       = 18.0 +  4.0/8.0
-    mark1_x_distance_to_zero=  1.0 + 7.0/8.0
-    mark1_y_distance_to_zero=  1.0 + 4.0/8.0
-    zero_delta_x_to_h1sq    =  1.0/16.0*0.0
-    zero_delta_y_to_h1sq    =  1.0/8.0*0.0
-
-
-    #windows_mark = np.array([ [ [650,250],[1050,650] ], [ [650,1250],[1050,1650] ], [ [2400,1250],[2800,1650] ] ])
-    windows_mark = np.array([ [ [3*cols/16,rows/2],[cols/2,rows-1] ], [ [3*cols/16,0],[cols/2,rows/2] ], [ [cols/2,0],[7*cols/8,rows/2] ] ])
-    if Eng_mode : print 'Windows mark : ',windows_mark
-    marks = np.array([ [0,0], [0,0], [0,0] ])
 
     clip = 0.95
-    
-#
-#   Find Mark locations
-#
-    if Eng_mode : fig, ax = plt.subplots(nrows = 2, ncols = 3)
-    
-    for i in range(3) :
-        lx = np.uint16(windows_mark[i,0,0])
-        ly = np.uint16(windows_mark[i,0,1])
-        hx = np.uint16(windows_mark[i,1,0])
-        hy = np.uint16(windows_mark[i,1,1])
-        crop_img = np.copy(image[ly:hy,lx:hx])       
-        #crop_img = (crop_img - np.min(crop_img))/(np.max(crop_img) - np.min(crop_img))           
-        crop_row,crop_col = crop_img.shape
-        mask_img = np.copy(crop_img)
-        mask_img[mask_img<=clip] = 0.0
-        marks[i] = np.median(np.argwhere(crop_img>clip),0)
-        mask_img[marks[i,0],marks[i,1]] = 0.0
-        if Eng_mode :
-            print 'size of crop image : ',crop_row,',',crop_col
-            ax[0,i].imshow(crop_img, aspect='equal', extent=[0,crop_col*xscal,0,crop_row], cmap='gray')      
-            ax[1,i].set_title('Peak: ('+str(round(marks[i,1]*xscal,1))+','+str(round(crop_row-marks[i,0],1))+')')   
-            ax[1,i].imshow(mask_img, aspect='equal', extent=[0,crop_col*xscal,0,crop_row], cmap='gray')        
-        marks[i,0]  = ly + marks[i,0]
-        marks[i,1] += lx       
-    if Eng_mode :
-        plt.show()
-        print 'Marks : (',marks.shape,',',marks 
 
-#
-#   Calibrate Images Scales
-#
-    if (marks[0,1]-marks[1,1]) != 0 :
-        row_inches = ( (marks[1,1]-marks[2,1])*mark1_to_mark2_distance/np.float((marks[0,1]-marks[1,1])) )**2 
-        row_inches -= mark2_to_mark3_distance**2 
-        row_inches /= ( (marks[1,1]-marks[2,1])*np.float((marks[0,0]-marks[1,0]))/np.float((marks[0,1]-marks[1,1])) )**2 - (marks[1,0]-marks[2,0])**2
-    elif (marks[0,0]-marks[1,0]) != 0 :
-        row_inches = (mark1_to_mark2_distance/(marks[0,0]-marks[1,0]))**2
-    else :
-        print '*** Calibration error : Marks 1 and Marks 2 are identical '
-    
-    if (marks[1,1]-marks[2,1]) != 0 :
-        col_inches = (mark2_to_mark3_distance**2 - row_inches*(marks[1,0]-marks[2,0])**2)/np.float((marks[1,1]-marks[2,1]))**2
-    elif (marks[1,0]-marks[2,0]) != 0 :
-        row_inches = (mark2_to_mark3_distance/(marks[1,0]-marks[2,0]))**2
-    else :
-        print '*** Calibration error : Marks 2 and Marks 3 are identical '       
-    
-    row_inches = row_inches**0.5
-    col_inches = col_inches**0.5
-    xscal = col_inches / row_inches
+#   find absolute board corners and squares by looking at the bigger image
 
-    
-    print 'Calibrated  xscal = ',xscal
-    print 'Row, col to inches calib factor : ',row_inches,',',col_inches
- 
-    r = (marks[0,0]-marks[2,0]) / np.float(marks[2,1]-marks[0,1]) / xscal
-    epsilon = math.atan(r)
-    alpha   = math.acos((mark1_to_mark3_distance**2 + mark3_to_zero_ref**2 - mark1_to_zero_ref**2)/(2*mark1_to_mark3_distance*mark3_to_zero_ref))
-    gamma   = math.asin(mark3_to_zero_ref*math.sin(alpha)/mark1_to_zero_ref)
-    theta   = gamma - epsilon
-
-    zero_location_col = marks[0,1] + (mark1_to_zero_ref*math.sin(theta))/col_inches
-    zero_location_row = marks[0,0] + (mark1_to_zero_ref*math.cos(theta))/row_inches
-
-    
-    print 'Using mark1, mark2 and mark3'
-    print 'Zero col: ',zero_location_col
-    print 'Zero row: ',zero_location_row
-
-#
-#   find board corner and use for as zero point
-#
-    clip_lev = 0.15
-    box = 0.2
-    lx = np.uint16(marks[0,1] + (mark1_x_distance_to_zero - box) / col_inches)
-    ly = np.uint16(marks[0,0] + (mark1_y_distance_to_zero - box) / row_inches)
-    hx = np.uint16(marks[0,1] + (mark1_x_distance_to_zero + box) / col_inches)
-    hy = np.uint16(marks[0,0] + (mark1_y_distance_to_zero + box) / row_inches)
- 
-    crop_img = np.copy(image[ly:hy,lx:hx])
-    crop_img = (crop_img - np.min(crop_img))/(np.max(crop_img) - np.min(crop_img))           
-    crop_row,crop_col = crop_img.shape
-    if Eng_mode :
-        print 'Crop image shape (row,cols) : ',crop_row,',',crop_col
-    
-        fig, ax = plt.subplots(nrows = 2, ncols = 2)
-        ax[0,0].imshow(crop_img, aspect='equal', extent=[0,crop_col*xscal,0,crop_row], cmap='gray')      
-    mask_img = np.copy(crop_img)
-    mask_img[mask_img <= clip_lev] = 0.0
-    mask_img[mask_img >  clip_lev] = 1.0
-    xsum_a = np.sum(mask_img,1)
-    ysum_a = np.sum(mask_img,0)
-    xsum_a = (xsum_a - np.min(xsum_a))/(np.max(xsum_a)-np.min(xsum_a))
-    ysum_a = (ysum_a - np.min(ysum_a))/(np.max(ysum_a)-np.min(ysum_a))
-    zero_location_col = np.mean(np.argwhere(ysum_a<0.5))
-    zero_location_row = np.mean(np.argwhere(xsum_a<0.5))
-    mask_img[zero_location_row,zero_location_col] = 1.0
-
-    if Eng_mode : ax[1,0].set_title('Corner (x,y): '+ str(round(zero_location_col*xscal,1))+','+str(round(crop_row-zero_location_row,1)))
-    
-    zero_location_col += lx
-    zero_location_row += ly
-
-    print 'Using detected corner of chess board'
-    print 'Zero col: ',zero_location_col
-    print 'Zero row: ',zero_location_row
-    
-    if Eng_mode :
-    
-        ax[1,0].imshow(mask_img, aspect='equal', extent=[0,crop_col*xscal,0,crop_row], cmap='gray')
-
-        ax[0,1].set_title('Sum along Y axis')
-        ax[0,1].plot(np.arange(crop_row),xsum_a)
-    
-        ax[1,1].set_title('Sum along X axis')
-        ax[1,1].plot(np.arange(crop_col)*xscal,ysum_a)
-    
-        plt.show()
-        
-    #b_b = input("Board  border width ("+str(board_border)+") :")
-    #if (b_b >0) : board_border  = b_b
-           
-    lx = np.uint16(round(zero_location_col+(zero_delta_x_to_h1sq-board_border)/col_inches,0))
-    ly = np.uint16(round(zero_location_row+(zero_delta_y_to_h1sq+board_border)/row_inches,0))
-    hx = lx+np.uint16(round((no_xsqs*sq_xd+2*board_border)/col_inches,0))
-    hy = ly-np.uint16(round((no_ysqs*sq_yd+2*board_border)/row_inches,0))
-
-#
-#   remember board corner in full image col,row units
-#
-    H1_boardcorner_col = lx
-    H1_boardcorner_row = ly
-    A8_boardcorner_col = hx
-    A8_boardcorner_row = hy
-
-    if Eng_mode : print 'Board corners : ',lx,',',ly,',',hx,',',hy
-
-#   overide and find absolute board corners and squares by looking at the bigger image
     lx = 275
     ly = nrows-4
     hx = 882
     hy = nrows-1910
     clip = 0.95
-
-    #print 'Image corners : ',lx,',',ly,',',hx,',',hy
 
     crop_img = np.copy(image[hy:ly,lx:hx])
     crop_img = (crop_img - np.min(crop_img))/(np.max(crop_img) - np.min(crop_img))
@@ -409,7 +254,6 @@ def calibrate_board(image,xscal,x0,y0,z0):
     board_img[A8_boardcorner_row:H1_boardcorner_row,H1_boardcorner_col:A8_boardcorner_col]=0.0
     board_img[ranks_y_location,:] = 1.0
     board_img[:,ranks_x_location] = 1.0
- 
     
     plt.imshow(board_img, aspect='equal', extent=[0,cols*xscal,0,rows], cmap='gray')
     plt.show()
