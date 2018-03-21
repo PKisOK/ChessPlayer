@@ -1,5 +1,5 @@
 
- #
+#
 #   Program to manually control Rajan's CNC using USB port
 #   while view video from the RPi camera mounted in the CNC arm
 #   and turning on and off the electromagnet using GPIO port to
@@ -154,8 +154,6 @@ def calibrate_board(image,xscal,x0,y0,z0):
     sq_xd = 1.5
     sq_yd = 1.5 + 1.0/16.0/8
     board_border = 0.20
-
-    clip = 0.95
 
 #   find absolute board corners and squares by looking at the bigger image
 
@@ -357,9 +355,10 @@ def absolute_coordinate_moves() :
 #   MAIN PROGRAM
 #
 #   Setup global variables and constants
-
 #
-#   To Run program in diagnostics mode set to True
+#
+#   To Run program in diagnostics mode set Eng_mode to True
+#   For audio feedback set Talk_mode to True
 #
 Eng_mode = True
 Talk_mode = False
