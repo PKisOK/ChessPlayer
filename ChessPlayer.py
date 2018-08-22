@@ -33,13 +33,14 @@ def talk(cmd):
     os.system(saycmd)
     return
 
-def find_laser (yscal) :
+def find_laser () :
 #
 #   Find location of laser in image usings of rows and cols
 #
 
     global Image, Inten
     global Laser_row, Laser_col
+    global Col_scal
 
 #
 #   inital box size
@@ -70,12 +71,12 @@ def find_laser (yscal) :
     pixel_std = np.std(pixels,axis = 0)
 
     if Eng_mode :       
-        print '# of pixs ',no_pixels,' x std ',pixel_std[0],' y std ',pixel_std[1]*yscal
+        print '# of pixs ',no_pixels,' x std ',pixel_std[0],' y std ',pixel_std[1]*Col_scal
         print 'size of crop image : ',crop_row,',',crop_col
         print 'Marks : (',marks.shape,'),',marks 
 
     locs = pixels*1.0
-    locs[:,1] = locs[:,1]*yscal
+    locs[:,1] = locs[:,1]*Col_scal
 
     n_pixels = np.shape(locs)[0]
     locs_mat1x = np.outer(locs[:,0],np.ones(n_pixels))
@@ -108,9 +109,9 @@ def find_laser (yscal) :
         print 'Laser mark : ',laser_row,' , ',laser_col
     
         fig, ax = plt.subplots(nrows = 1, ncols = 2)
-        ax[0].imshow(crop_img, aspect='equal', extent=[0,crop_col*yscal,0,crop_row], cmap='gray')      
-        ax[1].set_title('Laser Spot: ('+str(round(laser_col*yscal,1))+','+str(round(crop_row-laser_row,1))+')')   
-        ax[1].imshow(mask_img, aspect='equal', extent=[0,crop_col*yscal,0,crop_row], cmap='gray')        
+        ax[0].imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')      
+        ax[1].set_title('Laser Spot: ('+str(round(laser_col*Col_scal,1))+','+str(round(crop_row-laser_row,1))+')')   
+        ax[1].imshow(mask_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')        
         plt.show()
 
     laser_row += lx
@@ -121,7 +122,7 @@ def find_laser (yscal) :
     
     return laser_row,laser_col
 
-def board_analysis(yscal):
+def board_analysis():
 
 #
 #   allows manual analysis of images
@@ -129,12 +130,14 @@ def board_analysis(yscal):
 
     global Image, Inten
     global Nrows, Ncols
+    global Col_scal
+    
 
     (rows,cols) = Inten.shape
 
     low_x = 0
     low_y = 0
-    hi_x = int(cols*yscal)
+    hi_x = int(cols*Col_scal)
     hi_y = rows
     
     prompt = "Analysis Mode Command (? for list of commands) : "
@@ -154,25 +157,25 @@ def board_analysis(yscal):
     while (strin.lower() != "q"):    
         if (strin.lower() == "v") :
             capture_Image(0)
-            plt.imshow(Inten, aspect='equal', extent=[0,cols*yscal,0,rows], cmap='gray')
+            plt.imshow(Inten, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
             plt.show()
         elif (strin.lower() == "vr") :
             capture_Image(1)
-            plt.imshow(Inten, aspect='equal', extent=[0,cols*yscal,0,rows], cmap='Reds_r')
+            plt.imshow(Inten, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='Reds_r')
             plt.show()
         elif (strin.lower() == "vg") :
             capture_Image(2)
-            plt.imshow(Inten, aspect='equal', extent=[0,cols*yscal,0,rows], cmap='Greens_r')
+            plt.imshow(Inten, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='Greens_r')
             plt.show()
         elif (strin.lower() == "vb") :
             capture_Image(3)
-            plt.imshow(Inten, aspect='equal', extent=[0,cols*yscal,0,rows], cmap='Blues_r')
+            plt.imshow(Inten, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='Blues_r')
             plt.show()
         elif (strin.lower() == "fl") :
-            laser_row,laser_col = find_laser(yscal)
+            laser_row,laser_col = find_laser(Col_scal)
         elif(strin.lower() == "l") :
             fig, ax = plt.subplots(nrows = 2, ncols = 1) 
-            ax[0].imshow(Inten, aspect='equal', extent=[0,cols*yscal,0,rows], cmap='gray')
+            ax[0].imshow(Inten, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
             n, bins = np.histogram(Inten, bins=100)
             print '# bins: ',bins.shape,' Min bin ',np.min(bins),' Max bin : ',np.max(bins)
             ax[1].plot(bins[1:],n)
@@ -180,7 +183,7 @@ def board_analysis(yscal):
             clip = input('Select clip level for masking Image (0.0 to 1.0): ')
             mask_img = np.copy(Inten)
             mask_img[mask_img<=clip] = 0.0
-            plt.imshow(mask_img, aspect='equal', extent=[0,cols*yscal,0,rows], cmap='gray')
+            plt.imshow(mask_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
             plt.show()
         elif (strin.lower() == "c") :            
             print 'Input for cropping (type 0 to use previous values)'
@@ -193,9 +196,9 @@ def board_analysis(yscal):
             if (h_x >0) : hi_x  = h_x
             if (h_y >0) : hi_y  = h_y
            
-            lx = np.uint16(low_x/yscal)
+            lx = np.uint16(low_x/Col_scal)
             ly = rows - np.uint16(hi_y)
-            hx = np.uint16(hi_x/yscal)
+            hx = np.uint16(hi_x/Col_scal)
             hy = rows - np.uint16(low_y)
             crop_img = Inten[ly:hy,lx:hx]
             #crop_img = (crop_img - np.min(crop_img))/(np.max(crop_img) - np.min(crop_img))
@@ -208,7 +211,7 @@ def board_analysis(yscal):
             
             fig, ax = plt.subplots(nrows = 3, ncols = 3) 
             ax[0,0].set_title('Raw Cropped Image')
-            ax[0,0].imshow(crop_img, aspect='equal', extent=[0,crop_col*yscal,0,crop_row], cmap='gray')
+            ax[0,0].imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
             n, bins = np.histogram(crop_img, bins=100)
             norm = np.float16(np.add.accumulate(n))/np.sum(n)
             ax[0,1].set_title('Intensity Histogram')
@@ -218,11 +221,11 @@ def board_analysis(yscal):
             mask_img = np.copy(crop_img)
             mask_img[mask_img<=clip] = 0.0          
             ax[0,2].set_title('Clipped Image (Pixel Fract > '+str(1-clip)+': Inten Level > '+str(round(clip_lev,3))+')')
-            ax[0,2].imshow(mask_img, aspect='equal', extent=[0,crop_col*yscal,0,crop_row], cmap='gray')
+            ax[0,2].imshow(mask_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
 
             dx_array = abs(crop_img[:,1:]-crop_img[:,:-1])
             ax[1,0].set_title('dX derivative Image')
-            ax[1,0].imshow(dx_array, aspect='equal', extent=[0,crop_col*yscal,0,crop_row], cmap='gray')
+            ax[1,0].imshow(dx_array, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
 
             dx_sum = np.array([np.arange(crop_col-1),np.sum(dx_array,0)]).T
             ax[1,1].set_title('dX sum along Y axis (avg: '+str(round(np.mean(dx_sum[:,1]),1))+')')
@@ -234,7 +237,7 @@ def board_analysis(yscal):
 
             dy_array = abs(crop_img[1:,:]-crop_img[:-1,:])
             ax[2,0].set_title('dY derivative Image')
-            ax[2,0].imshow(dy_array, aspect='equal', extent=[0,crop_col*yscal,0,crop_row], cmap='gray')
+            ax[2,0].imshow(dy_array, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
 
             dy_sum = np.array([np.arange(crop_row-1),np.sum(dy_array,1)]).T
             ax[2,1].set_title('dY sum along X axis (avg: '+str(round(np.mean(np.sum(dy_array,1)),1))+')')
@@ -247,7 +250,7 @@ def board_analysis(yscal):
             plt.show()
 
             dXdY_array = dx_array[:-1,:] + dy_array[:,:-1]
-            plt.imshow(dXdY_array, aspect='equal', extent=[0,(crop_col-1)*yscal,0,(crop_row-1)], cmap='gray')
+            plt.imshow(dXdY_array, aspect='equal', extent=[0,(crop_col-1)*Col_scal,0,(crop_row-1)], cmap='gray')
             plt.show()
             
         else :
@@ -255,7 +258,7 @@ def board_analysis(yscal):
         strin = raw_input (prompt);
     return crop_img
 
-def calibrate_board(yscal):
+def calibrate_board():
 #
 #   Function does the following
 #       
@@ -273,6 +276,7 @@ def calibrate_board(yscal):
     global Row_inches, Col_inches
     global Zero_location_col
     global Zero_location_row
+    global Col_scal
 
     (rows,cols) = Inten.shape
     if Eng_mode : print 'Size of full Image: ',rows,',',cols
@@ -302,11 +306,11 @@ def calibrate_board(yscal):
     
     if Eng_mode :
         fig, ax = plt.subplots(nrows = 3, ncols = 3)
-        ax[0,0].imshow(crop_img, aspect='equal', extent=[0,crop_col*yscal,0,crop_row], cmap='gray')
+        ax[0,0].imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
         ax[0,0].set_title('Chess Board Image')
         ax[0,1].plot(bins[1:],n)
         ax[0,1].set_title('Intensity Histogram')            
-        ax[1,0].imshow(dy_array, aspect='equal', extent=[0,(crop_col-1)*yscal,0,crop_row], cmap='gray')
+        ax[1,0].imshow(dy_array, aspect='equal', extent=[0,(crop_col-1)*Col_scal,0,crop_row], cmap='gray')
         ax[1,0].set_title('dY Image')
         ax[1,1].plot(np.arange(crop_col-1),dy_sum)
         ax[1,1].set_title('peaks are Col/Rank Boundaries')
@@ -337,7 +341,7 @@ def calibrate_board(yscal):
     dx_array = abs(crop_img[1:,:]-crop_img[:-1,:])
     dx_sum = np.sum(dx_array,1)
     if Eng_mode :
-        ax[2,0].imshow(dx_array, aspect='equal', extent=[0,crop_col*yscal,0,(crop_row-1)], cmap='gray')
+        ax[2,0].imshow(dx_array, aspect='equal', extent=[0,crop_col*Col_scal,0,(crop_row-1)], cmap='gray')
         ax[2,0].set_title('dX Image')
         ax[2,1].plot(np.arange(crop_row-1),dx_sum)
         ax[2,1].set_title('peaks are File Boundaries')
@@ -372,7 +376,7 @@ def calibrate_board(yscal):
     H1_boardcorner_row = max(squares_x_location)
     Col_inches = no_ysqs*sq_yd/(A8_boardcorner_col-H1_boardcorner_col)
     Row_inches = no_xsqs*sq_xd/(H1_boardcorner_row-A8_boardcorner_row)
-    yscal = Col_inches / Row_inches
+    Col_scal = Col_inches / Row_inches
 
     files_c = np.float16(squares_x_location[1:]+squares_x_location[:-1])*0.5
     ranks_c = np.float16(squares_y_location[1:]+squares_y_location[:-1])*0.5
@@ -401,7 +405,7 @@ def calibrate_board(yscal):
         print 'Board Corners : ',H1_boardcorner_col,',',H1_boardcorner_row,',',A8_boardcorner_col,',',A8_boardcorner_row
         print 'Col_inches : ', Col_inches
         print 'Row_inches : ', Row_inches
-        print 'yscal : ', yscal
+        print 'Col_scal : ', Col_scal
 
     board_img = np.copy(Inten)
     board_img[A8_boardcorner_row:H1_boardcorner_row,H1_boardcorner_col:A8_boardcorner_col]=0.0
@@ -409,14 +413,14 @@ def calibrate_board(yscal):
     board_img[:,squares_y_location] = 1.0
     
     if Eng_mode :
-        plt.imshow(board_img, aspect='equal', extent=[0,cols*yscal,0,rows], cmap='gray')
+        plt.imshow(board_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
         plt.show()
-        plt.imshow(crop_img, aspect='equal', extent=[0,crop_col*yscal,0,crop_row], cmap='gray')
+        plt.imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
         plt.show()
     
     return
 
-def calibrate_arm_location(yscale) :
+def calibrate_arm_location() :
 
     global Loc_cur
     global X0,Y0,Z0
@@ -427,16 +431,17 @@ def calibrate_arm_location(yscale) :
     global Row_inches, Col_inches
     global Zero_location_col
     global Zero_location_row
+    global Col_scal
 
 #
 #   turn on laser and capture image
 #
-    GPIO.output(22, True)
+    GPIO.output(22, 1)
     capture_Image(1)
 #
 #   find laser spot
 #
-    laser_row,laser_col = find_laser(yscale)
+    laser_row,laser_col = find_laser()
 
 #    print 'Laser row,col : {0:.3f} , {1:.3f}'.format(laser_row,laser_col)
     
@@ -456,7 +461,10 @@ def calibrate_arm_location(yscale) :
     
     if (laser_y_loc < 6) :
         theta = -theta
-    phi   = math.atan((laser_x_loc-6)/(laser_y_loc-6))
+    if (laser_y_loc <> 6) :
+        phi   = math.atan((laser_x_loc-6)/(laser_y_loc-6))
+    else :
+        phi   = math.pi*0.5
 
 #    print 'theta, phi : {0:.3f}, {1:.3f}'.format(theta,phi)
     
@@ -494,9 +502,200 @@ def calibrate_arm_location(yscale) :
 #
 #   turn off laser
 #
-    GPIO.output(22, False)
+    GPIO.output(22, 0)
 
     return
+
+def act_on_chesspiece(action, piece) :
+
+#
+#   move pickup or place chess piece
+#
+#       action = 'pickup'
+#                'place'
+#
+#       piece = 'k','q','r','b','k','p'
+#
+    global Piece_hts
+    global Hover_ht
+    global Magnet2laser_offset
+    global Laser_height_0
+
+    piece_lst = 'kqrbkp'
+
+    p = piece[0].lower()
+    
+    if p in piece_lst :
+        n = piece_lst.index(p)
+        zloc = Piece_hts[n]-Laser_height_0-Magnet2laser_offset[2]
+        
+        print 'Moving to (',zloc,')'
+
+        loc = [zloc]
+        move2loc('Z',loc)
+        time.sleep(20)
+
+        if action == 'pickup' :
+            magnet_on_off(1)
+        else :
+            magnet_on_off(0)
+
+        zloc = Hover_ht - Laser_height_0 - Magnet2laser_offset[2]
+
+        print 'Moving to (',zloc,')'
+
+        loc = [zloc]
+        move2loc('Z',loc)
+        time.sleep(20)
+              
+    else :
+        print 'Invalid chess piece : ',piece
+                                     
+    return
+
+def move2square(square) :
+
+#
+#   move arm to chess square
+#
+    global Board
+
+    file_list = 'abcdefgh'
+    rank_list = '12345678'
+    
+    if len(square) == 2 :
+        if square[0] in file_list :
+            file_n = file_list.index(square[0])
+        if square[1] in rank_list :
+            rank_n = rank_list.index(square[1])
+        xloc = Board[file_n,rank_n,1,0]
+        yloc = Board[file_n,rank_n,1,1]
+
+        print 'Moving to ',square,' located at (',xloc,',',yloc,')'
+
+        loc = [xloc,yloc]
+        move2loc('XY',loc)                                    
+    else :
+        print 'Invalid chess square : ',square
+                                     
+    return
+
+def move2loc(axis, loc) :
+    
+#
+#   move arm to absolute X,Y,Z coordinates
+#
+#   axis = 'X'  for x axis motion
+#          'Y'  for y axis motion
+#          'Z'  for z axis motion
+#          'XY' for simultaneous x and y axis motion
+#          'XYZ' for simultaneous x,y,z axis motion
+#
+    global XYZ_limits
+    global Loc_cur, Loc_pre
+    global CNC_scale
+    global Backlash
+
+    axis_lst = 'XYZ'
+    cmd_str = ''
+
+    for i in range(len(axis)) :
+    
+        ax = axis[i].upper()
+
+        if ax in axis_lst :
+            n = axis_lst.index(ax)
+   
+            if loc[i] > XYZ_limits[n][1] :
+                loc[i] = XYZ_limits[n][1]
+                print 'Upper limit for axis '+ax+' reached : ',loc[i]
+            elif loc[i] < XYZ_limits[n][0] :
+                loc[i] = XYZ_limits[n][0]
+                print 'Lower limit for axis '+ax+' reached : ',loc[i] 
+            value = loc[i] - Loc_cur[n]
+        
+            if   ( (Loc_cur[n] < Loc_pre[n]) & (value > 0) ) :
+                value = value + Backlash[n][0]
+                print 'Backlash correction applied'
+            elif ( (Loc_cur[n] > Loc_pre[n]) & (value < 0) ) :
+                value = value - Backlash[n][1]
+                print 'Backlash correction applied'
+            
+            if (loc[i] - Loc_cur[n]) != 0 :
+                Loc_pre[n] = Loc_cur[n]
+                Loc_cur[n] = loc[i]
+
+            GRBLvalue = round(value/CNC_scale[n],2)
+
+#            print 'loc : '+ax+':',loc
+#            print 'GRBL : ',GRBLvalue
+
+            if n == 0 :
+                cmd_str = cmd_str+' Y'+repr(GRBLvalue)
+            elif n == 1 :
+                cmd_str = cmd_str+' X'+repr(-GRBLvalue)
+            elif n == 2 :
+                cmd_str = cmd_str+' Z'+repr(GRBLvalue)
+        
+        else :
+            print '*** Motion Axis "'+axis+'" not valid *** '
+
+    cmd_str = 'G91 G0'+cmd_str+'\r\n'
+
+    print 'GRBL cmd : '+cmd_str,
+
+    ser.write(cmd_str)        
+    reply = ser.readline()
+    print 'CNC Reply back: ',reply,
+        
+    return
+
+def chess_move(move)    :
+#
+#   takes chess move command in full algebraic notation and
+#   executes moves
+#
+#       e.g.  Nb1-c3  moves night on b1 to c3 square
+#             Qd1xBh4  queen capture bishop on h4 square by first removing
+#                       piece on h4 square and then moving queen to h4
+#
+
+    global Hover_ht
+    global Captured_piece_loc
+
+    if len(move) in [6,7] :
+        p_m = move[0].lower()
+        sq0 = move[1:3].lower()
+        if len(move) == 7 :
+            p_c = move[4].lower()
+            sq1 = move[5:7].lower()
+            move2loc('z',[Hover_ht])    
+            move2square(sq1)
+            act_on_chesspiece('pickup',p_c)
+            move2loc('xy', Captured_piece_loc)
+            act_on_chesspiece('place',p_c)
+            Captured_piece_loc[0] += 1.0
+        else :
+            sq1 = move[4:6].lower()
+        move2square(sq0)
+        act_on_chesspiece('pickup',p_m)
+        move2square(sq1)
+        act_on_chesspiece('place',p_m)
+    else :
+        print 'Chess move : ('+move+') not recoqnized'
+        
+    return
+
+def get_square_image(square)
+#
+#  crops the image of the chess square and returns cropped image
+#
+    global Board
+    global Image, Inten
+
+    c_imag = Inten
+    
+    return c_img
 
 def absolute_coordinate_moves() :
 
@@ -506,143 +705,46 @@ def absolute_coordinate_moves() :
 #   All move units are in inches,  scale factor used to convert inches to GRBL move units for CNC
 
 
-
     prompt = "Absolute Coordinate Move Command (? for list of commands) : "
     cmdlst = "List of commands: \n"
     cmdlst = cmdlst + "    x  : move in x direction\n"
     cmdlst = cmdlst + "    y  : move in y direction\n"
     cmdlst = cmdlst + "    z  : move in z direction\n"
     cmdlst = cmdlst + "    sq : move to chess square\n"
+    cmdlst = cmdlst + "    pick : pick up chess piece\n"
+    cmdlst = cmdlst + "    place : place chess piece\n"
+    cmdlst = cmdlst + "    loc : display current location\n"
+    cmdlst = cmdlst + "    chess : enter a chess move command\n"    
     cmdlst = cmdlst + "    q  : finished return to main menu\n"
-
-    file_list = 'abcdefgh'
-    rank_list = '12345678'
     
     strin = raw_input (prompt);
     while (strin.lower() != "q"):    
         if (strin.lower() == "x") : 
-            xloc = input('Enter in X coordinate : (' + repr(round(Loc_pre[0],2)) + '->' + repr(round(Loc_cur[0],2)) + ') ')
-            if xloc > X_limits[1] :
-                xloc = X_limits[1]
-                print 'Limit reached : ',xloc
-            elif xloc < X_limits[0] :
-                xloc = X_limits[0]
-                print 'Limit reached : ',xloc 
-            value = xloc - Loc_cur[0]
-            if   ( (Loc_cur[0] < Loc_pre[0]) & (value > 0) ) :
-                value = value + X_backlash[0]
-                print 'Backlash correction applied'
-            elif ( (Loc_cur[0] > Loc_pre[0]) & (value < 0) ) :
-                value = value - X_backlash[1]
-                print 'Backlash correction applied'
-            GRBLvalue = round(value/X_scale,2)
-            print 'GRBL value = ',repr(GRBLvalue) 
-            ser.write('G91 G0 Y'+repr(GRBLvalue)+'\r\n')
-            reply = ser.readline()
-            print 'CNC Reply back: ',reply,
-            if (xloc - Loc_cur[0]) != 0 :
-                Loc_pre[0] = Loc_cur[0]
-                Loc_cur[0] = xloc
+            loc = input('Enter in X coordinate : (' + repr(round(Loc_pre[0],2)) + '->' + repr(round(Loc_cur[0],2)) + ') ')
+            loc_l = [loc]
+            move2loc(strin,loc_l)
         elif (strin.lower() == "y") :
-            yloc = input('Enter in Y coordinate : (' + repr(round(Loc_pre[1],2)) + '->' + repr(round(Loc_cur[1],2)) + ') ')
-            if yloc > Y_limits[1] :
-                yloc = Y_limits[1]
-                print 'Limit reached : ',yloc                
-            elif yloc < Y_limits[0] :
-                yloc = Y_limits[0]
-                print 'Limit reached : ',yloc   
-            value = yloc - Loc_cur[1]
-            if   ( (Loc_cur[1] < Loc_pre[1]) & (value > 0) ) :
-                value = value + Y_backlash[0]
-                print 'Backlash correction applied'                
-            elif ( (Loc_cur[1] > Loc_pre[1]) & (value < 0) ) :
-                value = value - Y_backlash[1]
-                print 'Backlash correction applied'
-            GRBLvalue = round(-value/Y_scale,2)
-            ser.write('G91 G0 X'+repr(GRBLvalue)+'\r\n')
-            reply = ser.readline()
-            print 'CNC Reply back: ',reply,
-            if (yloc - Loc_cur[1]) != 0 :
-                Loc_pre[1] = Loc_cur[1]
-                Loc_cur[1] = yloc     
+            loc = input('Enter in Y coordinate : (' + repr(round(Loc_pre[1],2)) + '->' + repr(round(Loc_cur[1],2)) + ') ')
+            loc_l = [loc]
+            move2loc(strin,loc_l)
         elif (strin.lower() == "z") :
-            zloc = input('Enter in Z coordinate : (' + repr(round(Loc_pre[2],2)) + '->' + repr(round(Loc_cur[2],2)) + ') ')
-            if zloc > Z_limits[1] :
-                zloc = Z_limits[1]
-                print 'Limit reached : ',zloc   
-            elif zloc < Z_limits[0] :
-                zloc = Z_limits[0]
-                print 'Limit reached : ',zloc 
-            value = zloc - Loc_cur[2]
-            if   ( (Loc_cur[2] < Loc_pre[2]) & (value > 0) ) :
-                value = value + Z_backlash[0]
-                print 'Backlash correction applied' 
-            elif ( (Loc_cur[2] > Loc_pre[2]) & (value < 0) ) :
-                value = value - Z_backlash[1]
-                print 'Backlash correction applied'                
-            GRBLvalue = round(value/Z_scale,2)
-            ser.write('G91 G0 Z'+repr(GRBLvalue)+'\r\n')
-            reply = ser.readline()
-            print 'CNC Reply back: ',reply,
-            if (zloc - Loc_cur[2]) != 0 :
-                Loc_pre[2] = Loc_cur[2]
-                Loc_cur[2] = zloc     
+            loc = input('Enter in Z coordinate : (' + repr(round(Loc_pre[2],2)) + '->' + repr(round(Loc_cur[2],2)) + ') ')
+            loc_l = [loc]
+            move2loc(strin,loc_l)
         elif (strin.lower() == "sq") :
             square = raw_input('Which chess square to move to? (e.g a1 or f3) ')
             square = square.lower()
-
-            if len(square) == 2 :                
-                if square[0] in file_list :
-                    file_n = file_list.index(square[0])
-                if square[1] in rank_list :
-                    rank_n = rank_list.index(square[1])
-            
-                xloc = Board[file_n,rank_n,1,0]
-                yloc = Board[file_n,rank_n,1,1]
-
-                print 'Moving to ',square,' located at (',xloc,',',yloc,')'
-            
-                if yloc > Y_limits[1] :
-                    yloc = Y_limits[1]
-                    print 'Limit reached : ',yloc                
-                elif yloc < Y_limits[0] :
-                    yloc = Y_limits[0]
-                    print 'Limit reached : ',yloc   
-                value = yloc - Loc_cur[1]
-                if   ( (Loc_cur[1] < Loc_pre[1]) & (value > 0) ) :
-                    value = value + Y_backlash[0]
-                    print 'Backlash correction applied'                
-                elif ( (Loc_cur[1] > Loc_pre[1]) & (value < 0) ) :
-                    value = value - Y_backlash[1]
-                    print 'Backlash correction applied'
-                GRBLy = round(-value/Y_scale,2)
-    
-                if xloc > X_limits[1] :
-                    xloc = X_limits[1]
-                    print 'Limit reached : ',xloc
-                elif xloc < X_limits[0] :
-                    xloc = X_limits[0]
-                    print 'Limit reached : ',xloc 
-                value = xloc - Loc_cur[0]
-                if   ( (Loc_cur[0] < Loc_pre[0]) & (value > 0) ) :
-                    value = value + X_backlash[0]
-                    print 'Backlash correction applied'
-                elif ( (Loc_cur[0] > Loc_pre[0]) & (value < 0) ) :
-                    value = value - X_backlash[1]
-                    print 'Backlash correction applied'
-                GRBLx = round(value/X_scale,2)
-            
-                ser.write('G91 G0 X'+repr(GRBLy)+' Y'+repr(GRBLx)+'\r\n')
-                reply = ser.readline()
-                print 'CNC Reply back: ',reply,
-                if (yloc - Loc_cur[1]) != 0 :
-                    Loc_pre[1] = Loc_cur[1]
-                    Loc_cur[1] = yloc     
-                if (xloc - Loc_cur[0]) != 0 :
-                    Loc_pre[0] = Loc_cur[0]
-                    Loc_cur[0] = xloc
-            else :
-                print 'Invalid square : ',square
+            move2square(square)
+        elif (strin.lower() == "pick") :
+            act_on_chesspiece('pickup','q')
+        elif (strin.lower() == "place") :
+            act_on_chesspiece('place','q')
+        elif (strin.lower() == "chess") :
+            move = raw_input('Enter chess move (e.g. Qd8-g6')
+            move = move.lower()
+            chess_move(move)
+        elif (strin.lower() == "loc")  :
+            print 'Current X,Y,Z location : {0:.3f}, {1:.3f}, {2:.3f}'.format(Loc_cur[0],Loc_cur[1],Loc_cur[2])           
         else :
             print cmdlst
         strin = raw_input (prompt);
@@ -664,6 +766,7 @@ def capture_Image (img_type) :
     global Ncols, Nrows
     
     camera.capture('binary.rgb',format = 'rgb', resize = (Ncols,Nrows))
+#   camera.capture('binary.rgb',format = 'rgb')
     Image = np.fromfile('binary.rgb',np.uint8, -1, '')
     Image = Image.reshape(Nrows,Ncols,3)
 
@@ -676,6 +779,31 @@ def capture_Image (img_type) :
 
     return
 
+def magnet_on_off(value) :
+
+    if value == 1 :
+        if Talk_mode : talk('Turning on magnet')
+        GPIO.output(38, 1)
+        GPIO.output(18, 1)
+    else :
+        if Talk_mode : talk('Turning off magnet')
+        GPIO.output(38, 0)
+        GPIO.output(18, 0)
+    
+    return
+
+def laser_on_off(value) :
+
+    if value == 1 :
+        if Talk_mode : talk('Turning on laser')
+        GPIO.output(22, 1)
+    else :
+        if Talk_mode : talk('Turning off laser')
+        GPIO.output(22, 0)
+    
+    return
+
+
 #
 #
 #   MAIN PROGRAM
@@ -683,11 +811,11 @@ def capture_Image (img_type) :
 #   Setup global variables and constants
 #
 #
-#   To Run program in diagnostics mode set Eng_mode to True
-#   For audio feedback set Talk_mode to True
+#   To Run program in diagnostics mode set Eng_mode to 1
+#   For audio feedback set Talk_mode to 1
 #
-Eng_mode = False
-Talk_mode = False
+Eng_mode = 0
+Talk_mode = 0
 #
 #   Co-ordinate convention
 #       zero location will be near chess square A1
@@ -699,23 +827,23 @@ Talk_mode = False
 #       has been calibrated correctly.  CNC will stop working and possible get
 #       damaged if operated beyond these limits.
 #
-Z_limits = [0.0,3.5]
-Y_limits = [0.0,15.0]
-X_limits = [0.0,12.0]
+XYZ_limits = [[0.0,12.0],[0.0,15.0],[0.0,3.25]]
 #       CNC backlash correction in inches (neg. to pos. , pos. to neg)
 Z_backlash = [0.0, 0.0]
 X_backlash = [0.06, 0.06]
 Y_backlash = [0.06, 0.06]
+Backlash = [[0.06, 0.06],[0.06,0.06],[0.0,0.0]]
 #       CNC GRBL value conversion to inches
 Y_scale = 0.97/25.4
 X_scale = 1.01/25.4
-Z_scale = 0.95/25.5
+Z_scale = 1.0/25.4
+CNC_scale = [X_scale,Y_scale,Z_scale]
 #       Vertical Distance (inches) of Pi Camera above center of Chess board
 Camera_height = 24.0 + 1.0/8.0
 #       offset of laser location from magnet in x,y,z (inches)
-Magnet2laser_offset = [0.0,0.0,-3.5]
+Magnet2laser_offset = [-0.25,0.0,-3.5]
 #       height of laser about chess board plane (inches) when Z height of arm is 0.0
-Laser_height_0 = 6.5
+Laser_height_0 = 5.25
 #
 #   X0,Y0,Z0 are the current location of the magnet arm in absolute coordinates (units are in inches)
 #
@@ -743,7 +871,9 @@ Zero_location_row = 0
 #                   1 : col location (p=0) or y location in inches (p=1)
 
 Board = np.float16(np.zeros((8,8,2,2)))
-
+Piece_hts = [2.0,2.0,2.25,2.25,2.25,2.25]     # ht of piece above plane of board - k,q,r,b,k,p
+Hover_ht  = 4.00                              # ht of magnet above plane of board when holding piece
+Captured_piece_loc = [6.0,14.5]
 #   GPIO setup
 #       use board numbering of the GPIO pins
 #       turn off warnings
@@ -753,10 +883,10 @@ Board = np.float16(np.zeros((8,8,2,2)))
 #       use pin 22 to turn on/off Laser for measuring magnet location relative to chess board
 
 GPIO.setmode(GPIO.BOARD)
-GPIO.setwarnings(False)
-GPIO.setup(18, GPIO.OUT,initial = False)
-GPIO.setup(22, GPIO.OUT,initial = False)
-GPIO.setup(38, GPIO.OUT,initial = False)
+GPIO.setwarnings(0)
+GPIO.setup(18, GPIO.OUT,initial = 0)
+GPIO.setup(22, GPIO.OUT,initial = 0)
+GPIO.setup(38, GPIO.OUT,initial = 0)
 
 #   Initialize camera
 #   setup camera orientation
@@ -780,12 +910,10 @@ Ncols = 1088
 Col_scal = 3.0
 camera = picamera.PiCamera()
 camera.rotation = 0
-camera.preview_fullscreen = False
+camera.preview_fullscreen = 0
 camera.crop = (0.0,0.0,1.0,1.0)
-# first 2 parameters are location, last 2 are size of window
-camera.preview_window =(0, 240, 720,540)
-#camera.preview_window =(0, 240, 960, 720)
-#camera.preview_window =(60, 540, 720, 540)
+camera.preview_window =(0, 240, 640,320)
+
 camera.resolution = (Nrows,Ncols)
 
 #   Set up Arduino link to control CNC machine
@@ -793,6 +921,26 @@ camera.resolution = (Nrows,Ncols)
 #       ACM0 is USB port for Arduino
 
 ser = serial.Serial('/dev/ttyACM0',115200)
+
+try:
+    prompt = raw_input('Enter y to run in Engineering Mode : ')
+    if prompt.lower() == 'y' :
+        Eng_mode = 1
+        print '*** running in Engineering Mode ***'
+    else :
+        Eng_mode = 0
+except ValueError:
+    Eng_mode = 0
+
+try:
+    prompt = raw_input('Enter y to run in Taling Mode : ')
+    if prompt.lower() == 'y' :
+        Talk_mode = 1
+        print '*** running in Talking Mode ***'
+    else :
+        Talk_mode = 0
+except ValueError:
+    Talk_mode = 0    
 
 if Talk_mode :
     talk('Hello.   I am Hal the chess playing cyclops')
@@ -829,26 +977,20 @@ while (strin.lower() != "q"):
         if Talk_mode : talk('OK, will go into calibration mode')
         capture_Image(0)
         camera.stop_preview()
-        calibrate_board(Col_scal)
+        calibrate_board()
         camera.start_preview()
     elif (strin.lower() == "magon") :
-        if Talk_mode : talk('Turning on magnet')
-        GPIO.output(38, True)
-        GPIO.output(18, True)
+        magnet_on_off(1)
     elif (strin.lower() == "magoff") :
-        if Talk_mode : talk('Turning off magnet')
-        GPIO.output(38, False)
-        GPIO.output(18, False)
+        magnet_on_off(0)
     elif (strin.lower() == "laseron") :
-        if Talk_mode : talk('Turning on Laser')
-        GPIO.output(22, True)
+        laser_on_off(1)
     elif (strin.lower() == "laseroff") :
-        if Talk_mode : talk('Turning off Laser')
-        GPIO.output(22, False)
+        laser_on_off(0)
     elif (strin.lower() == "anal") :
         if Talk_mode : talk('Entering manual board analysis mode')
         camera.stop_preview()
-        board = board_analysis(Col_scal)
+        board = board_analysis()
         camera.start_preview()
     elif (strin.lower() == "mo") :
         if Talk_mode : talk('Entering into absolute coordinate move mode')
@@ -856,7 +998,7 @@ while (strin.lower() != "q"):
     elif (strin.lower() == "arm") :
         if Talk_mode : talk('Entering into calibrate arm location mode')
         camera.stop_preview()
-        calibrate_arm_location(Col_scal)
+        calibrate_arm_location()
         camera.start_preview()
         print 'Current X,Y,Z location : {0:.3f}, {1:.3f}, {2:.3f}'.format(Loc_cur[0],Loc_cur[1],Loc_cur[2])
     elif (strin.lower() == "loc") :
