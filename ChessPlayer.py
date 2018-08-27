@@ -17,6 +17,7 @@
 #   sudo apt-get install python3-picamera
 #   sudo apt-get install python-numpy
 #   sudo apt-get install python-matplotlib
+#   sudo apt-get install python-scipy
 #
 
 import os
@@ -33,7 +34,7 @@ def talk(cmd):
     os.system(saycmd)
     return
 
-def find_laser () :
+def find_laser() :
 #
 #   Find location of laser in image usings of rows and cols
 #
@@ -41,6 +42,7 @@ def find_laser () :
     global Image, Inten
     global Laser_row, Laser_col
     global Col_scal
+    global Eng_mode, Plt_mode
 
 #
 #   inital box size
@@ -107,12 +109,14 @@ def find_laser () :
     if Eng_mode :
         print '# of pixs ',no_pixels,' avg. distance', avg_dist    
         print 'Laser mark : ',laser_row,' , ',laser_col
-    
-        fig, ax = plt.subplots(nrows = 1, ncols = 2)
-        ax[0].imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')      
-        ax[1].set_title('Laser Spot: ('+str(round(laser_col*Col_scal,1))+','+str(round(crop_row-laser_row,1))+')')   
-        ax[1].imshow(mask_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')        
-        plt.show()
+
+        if Plt_mode :
+            fig, ax = plt.subplots(nrows = 1, ncols = 2)
+            ax[0].imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')      
+            ax[1].set_title('Laser Spot: ('+str(round(laser_col*Col_scal,1))+','+str(round(crop_row-laser_row,1))+')')   
+            ax[1].imshow(mask_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')        
+            plt.show()
+            plt.close()       # free up memory
 
     laser_row += lx
     laser_col += ly
@@ -121,6 +125,123 @@ def find_laser () :
         print 'Laser mark : ',laser_row,' , ',laser_col
     
     return laser_row,laser_col
+
+def plot_inten_hist(img) :
+
+    (rows,cols) = img.shape
+        
+    fig, ax = plt.subplots(nrows = 1, ncols = 3)
+     
+    ax[0].set_title('Raw Image')
+    ax[0].imshow(img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+    n, bins = np.histogram(img, bins=100)
+    # print '# bins: ',bins.shape,' Min bin ',np.min(bins),' Max bin : ',np.max(bins)
+    ax[1].set_title('Inten Hist')
+    ax[1].plot(bins[1:],n)
+    norm = np.float16(np.add.accumulate(n))/np.sum(n)
+    ax[2].set_title('Cum Inten Hist')
+    ax[2].plot(bins[1:],norm)
+    plt.show()
+    plt.close()       # free up memory
+
+    clip = input('Select clip level for masking Image (0.0 to 1.0) (<0.0 for reverse mask): ')
+    mask_img = np.copy(img)
+    if clip > 0 :
+        mask_img[mask_img<=clip] = 0.0
+    else :
+        mask_img[mask_img>= (-clip)] = 1.0
+    
+    fig, ax = plt.subplots(nrows = 1, ncols = 3)
+        
+    ax[0].set_title('Clipped Image ('+str(clip)+')')
+    ax[0].imshow(mask_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+    n, bins = np.histogram(mask_img, bins=100)
+    ax[1].set_title('Clipped Hist')
+    ax[1].plot(bins[1:],n)
+    norm = np.float16(np.add.accumulate(n))/np.sum(n)
+    ax[2].set_title('Cum Hist')
+    ax[2].plot(bins[1:],norm)
+    plt.show()
+    plt.close()       # free up memory
+        
+    return clip
+
+
+def plot_derivative_img(img) :
+
+    global Eng_mode, Plt_mode
+    
+    rows,cols = img.shape
+
+    dx_array = abs(img[:,1:]-img[:,:-1])
+    dy_array = abs(img[1:,:]-img[:-1,:])
+#        dx_sum = np.array([np.arange(cols-1),np.sum(dx_array,0)]).T
+#        dy_sum = np.array([np.arange(rows-1),np.sum(dy_array,1)]).T
+    dXdY_array = dx_array[:-1,:] + dy_array[:,:-1]
+
+    if Plt_mode :
+        fig, ax = plt.subplots(nrows = 1, ncols = 3)
+                
+        ax[0].set_title('Derivative Image')
+        ax[0].imshow(dXdY_array, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+
+        n, bins = np.histogram(dXdY_array, bins=100)
+        ax[1].set_title('Derv Hist')
+        ax[1].plot(bins[1:],n)
+        
+        norm = np.float16(np.add.accumulate(n))/np.sum(n)
+        ax[2].set_title('Cummulative Derv Hist')
+        ax[2].plot(bins[1:],norm)
+        
+        plt.show()
+        plt.close()       # free up memory
+
+        clip = input('Select clip level for masking derivative Image (0.0 to 1.0) (<0.0 for reverse mask): ')
+        mask_img = np.copy(dXdY_array)
+        if clip > 0 :
+            mask_img[mask_img<=clip] = 0.0
+        else :
+            mask_img[mask_img>= (-clip)] = 1.0
+    
+        fig, ax = plt.subplots(nrows = 1, ncols = 3)
+        
+        ax[0].set_title('Clipped Derv Image ('+str(clip)+')')
+        ax[0].imshow(mask_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+        n, bins = np.histogram(mask_img, bins=100)
+        ax[1].set_title('Clipped Derv Hist')
+        ax[1].plot(bins[1:],n)
+        norm = np.float16(np.add.accumulate(n))/np.sum(n)
+        ax[2].set_title('Cum Clipped Derv Hist')
+        ax[2].plot(bins[1:],norm)
+
+        plt.show()
+        plt.close()       # free up memory        
+
+    return clip
+
+
+def crop_img(low_x,low_y,hi_x,hi_y) :
+    
+    print 'Input for cropping (type 0 to use previous cropped values)'
+    l_x = input("Enter lower left  hand X value: ("+str(low_x)+") ")
+    l_y = input("Enter lower left  hand Y value: ("+str(low_y)+") ")
+    h_x = input("Enter upper right hand X value: ("+str(hi_x)+") ")
+    h_y = input("Enter upper right hand Y value: ("+str(hi_y)+") ")
+    if (l_x >0) : low_x = l_x
+    if (l_y >0) : low_y = l_y
+    if (h_x >0) : hi_x  = h_x
+    if (h_y >0) : hi_y  = h_y
+           
+    lx = np.uint16(low_x/Col_scal)
+    ly = rows - np.uint16(hi_y)
+    hx = np.uint16(hi_x/Col_scal)
+    hy = rows - np.uint16(low_y)
+    crop_img = np.copy(Inten[ly:hy,lx:hx])
+    #crop_img = (crop_img - np.min(crop_img))/(np.max(crop_img) - np.min(crop_img))
+    
+    return low_x,low_y,hi_x,hi_y,crop_img
+
+  
 
 def board_analysis():
 
@@ -134,7 +255,7 @@ def board_analysis():
     
 
     (rows,cols) = Inten.shape
-
+    
     low_x = 0
     low_y = 0
     hi_x = int(cols*Col_scal)
@@ -146,117 +267,126 @@ def board_analysis():
     cmdlst = cmdlst + "    vr  : capture new Image and view the full Image in red scale\n"
     cmdlst = cmdlst + "    vg  : capture new Image and view the full Image in green scaled\n"
     cmdlst = cmdlst + "    vb  : capture new Image and view the full Image in blue scaled\n"
-    cmdlst = cmdlst + "    l  : set threshold level for existing Image analysis\n"
-    cmdlst = cmdlst + "    c  : crop existing Image and analyze derivatives of cropped Image\n"
+    cmdlst = cmdlst + "   chess: update board position and print it out\n"
+    cmdlst = cmdlst + "    sq  : crop images for chess square\n"
+    cmdlst = cmdlst + "    l  : analyze threshold level of cropped Image\n"
+    cmdlst = cmdlst + "    c  : crop existing Image\n"
+    cmdlst = cmdlst + "    der  : analyze derivatives of cropped Image\n"
     cmdlst = cmdlst + "    fl : find laser mark in image\n"
     cmdlst = cmdlst + "    q  : finished analysis return to main menu\n"
 
-    crop_img = 0
+    crop_img = np.copy(Inten)
 
     strin = raw_input (prompt);
     while (strin.lower() != "q"):    
         if (strin.lower() == "v") :
-            capture_Image(0)
+            capture_image(0,'all')
             plt.imshow(Inten, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
             plt.show()
+            plt.close()       # free up memory
+            low_x = 0
+            low_y = 0
+            hi_x = int(cols*Col_scal)
+            hi_y = rows
+            crop_img = np.copy(Inten)
         elif (strin.lower() == "vr") :
-            capture_Image(1)
+            capture_image(1,'all')
             plt.imshow(Inten, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='Reds_r')
             plt.show()
+            plt.close()       # free up memory
+            low_x = 0
+            low_y = 0
+            hi_x = int(cols*Col_scal)
+            hi_y = rows
+            crop_img = np.copy(Inten)
         elif (strin.lower() == "vg") :
-            capture_Image(2)
+            capture_image(2,'all')
             plt.imshow(Inten, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='Greens_r')
             plt.show()
+            plt.close()       # free up memory
+            low_x = 0
+            low_y = 0
+            hi_x = int(cols*Col_scal)
+            hi_y = rows
+            crop_img = np.copy(Inten)
         elif (strin.lower() == "vb") :
-            capture_Image(3)
+            capture_image(3,'all')
             plt.imshow(Inten, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='Blues_r')
             plt.show()
+            plt.close(ax)       # free up memory
+            low_x = 0
+            low_y = 0
+            hi_x = int(cols*Col_scal)
+            hi_y = rows
+            crop_img = np.copy(Inten)
+        elif (strin.lower() == "chess") :
+            update_chess_board()
+            print_chess_board()
+        elif (strin.lower() == "sq") :
+            sq = raw_input('Which square to view and create cropped image (e.g. a6, e8) ? ')
+            if len(sq) == 2 :
+                code = get_square_image(sq,5,3,0)
+                crop_img = np.copy(Sq_img)
+            else :
+                print 'Square (',sq,') not recognized'
         elif (strin.lower() == "fl") :
-            laser_row,laser_col = find_laser(Col_scal)
+            laser_row,laser_col = find_laser()
         elif(strin.lower() == "l") :
-            fig, ax = plt.subplots(nrows = 2, ncols = 1) 
-            ax[0].imshow(Inten, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
-            n, bins = np.histogram(Inten, bins=100)
-            print '# bins: ',bins.shape,' Min bin ',np.min(bins),' Max bin : ',np.max(bins)
-            ax[1].plot(bins[1:],n)
-            plt.show()
-            clip = input('Select clip level for masking Image (0.0 to 1.0): ')
-            mask_img = np.copy(Inten)
-            mask_img[mask_img<=clip] = 0.0
-            plt.imshow(mask_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
-            plt.show()
-        elif (strin.lower() == "c") :            
-            print 'Input for cropping (type 0 to use previous values)'
-            l_x = input("Enter lower left  hand X value: ")
-            l_y = input("Enter lower left  hand Y value: ")
-            h_x = input("Enter upper right hand X value: ")
-            h_y = input("Enter upper right hand Y value: ")
-            if (l_x >0) : low_x = l_x
-            if (l_y >0) : low_y = l_y
-            if (h_x >0) : hi_x  = h_x
-            if (h_y >0) : hi_y  = h_y
-           
-            lx = np.uint16(low_x/Col_scal)
-            ly = rows - np.uint16(hi_y)
-            hx = np.uint16(hi_x/Col_scal)
-            hy = rows - np.uint16(low_y)
-            crop_img = Inten[ly:hy,lx:hx]
-            #crop_img = (crop_img - np.min(crop_img))/(np.max(crop_img) - np.min(crop_img))
-            
-            crop_row,crop_col = crop_img.shape
-            print 'size of cropped Image (rows,cols) : ',crop_row,' by ',crop_col
-            print 'Max Inten: ',np.max(crop_img),' Min Intens: ',np.min(crop_img)
-            
-            clip = input('Select Intensity level > to mask Image (0.0 to 1.0): ')
-            
-            fig, ax = plt.subplots(nrows = 3, ncols = 3) 
-            ax[0,0].set_title('Raw Cropped Image')
-            ax[0,0].imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
-            n, bins = np.histogram(crop_img, bins=100)
-            norm = np.float16(np.add.accumulate(n))/np.sum(n)
-            ax[0,1].set_title('Intensity Histogram')
-            ax[0,1].plot(bins[1:],n)
-
-            clip_lev = np.min(bins[norm>clip])
-            mask_img = np.copy(crop_img)
-            mask_img[mask_img<=clip] = 0.0          
-            ax[0,2].set_title('Clipped Image (Pixel Fract > '+str(1-clip)+': Inten Level > '+str(round(clip_lev,3))+')')
-            ax[0,2].imshow(mask_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
-
-            dx_array = abs(crop_img[:,1:]-crop_img[:,:-1])
-            ax[1,0].set_title('dX derivative Image')
-            ax[1,0].imshow(dx_array, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
-
-            dx_sum = np.array([np.arange(crop_col-1),np.sum(dx_array,0)]).T
-            ax[1,1].set_title('dX sum along Y axis (avg: '+str(round(np.mean(dx_sum[:,1]),1))+')')
-            ax[1,1].plot(dx_sum[:,0],dx_sum[:,1])
-            n, bins = np.histogram(np.sum(dx_array,0), bins=100)
-            norm = np.float16(np.add.accumulate(n))/np.sum(n)
-            ax[1,2].set_title('Cummulative Histogram of dX sum')
-            ax[1,2].plot(bins[1:],norm)
-
-            dy_array = abs(crop_img[1:,:]-crop_img[:-1,:])
-            ax[2,0].set_title('dY derivative Image')
-            ax[2,0].imshow(dy_array, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
-
-            dy_sum = np.array([np.arange(crop_row-1),np.sum(dy_array,1)]).T
-            ax[2,1].set_title('dY sum along X axis (avg: '+str(round(np.mean(np.sum(dy_array,1)),1))+')')
-            ax[2,1].plot(dy_sum[:,0],dy_sum[:,1])
-
-            n, bins = np.histogram(np.sum(dy_array,1), bins=100)
-            norm = np.float16(np.add.accumulate(n))/np.sum(n)
-            ax[2,2].set_title('Cummulative Histogram of dY sum')
-            ax[2,2].plot(bins[1:],norm)            
-            plt.show()
-
-            dXdY_array = dx_array[:-1,:] + dy_array[:,:-1]
-            plt.imshow(dXdY_array, aspect='equal', extent=[0,(crop_col-1)*Col_scal,0,(crop_row-1)], cmap='gray')
-            plt.show()
-            
+            clip = plot_inten_hist(crop_img)    
+        elif (strin.lower() == "c") :
+            (low_x,low_y,hi_x,hi_y,crop_img) = crop_image(low_x,low_y,hi_x,hi_y)
+        elif (strin.lower() == "der") :
+            plot_derivative_img(crop_img)           
         else :
             print cmdlst
         strin = raw_input (prompt);
     return crop_img
+
+def update_chess_board() :
+
+    global Chess_board
+    
+    file_list = 'abcdefgh'
+    rank_list = '12345678'
+
+    capture_image(0,'board')
+    
+    for f in range(8) :
+        for r in range(8):
+            sq = file_list[f] + rank_list[r]
+            code = get_square_image(sq,5,3,0)
+            Chess_board[f][r] = code            
+    return
+
+def print_chess_board() :
+
+    global Chess_board
+    global Piece_code
+    global Color_code
+    
+    file_list = 'abcdefgh'
+    rank_list = '12345678'
+
+    print '  ',
+    for i in range(21) :
+        print '-',
+    print
+    for r in range(7,-1,-1) :
+        print rank_list[r],' |',
+        for f in range(8):
+            print Color_code[Chess_board[f][r][0]]+Piece_code[Chess_board[f][r][1]],'|',
+        print
+    print '  ',
+    for i in range(21) :
+        print '-',
+    print
+    print '   |',
+    for f in range(8) :
+        print file_list[f],' |',
+    print
+
+    return
+    
 
 def calibrate_board():
 #
@@ -270,13 +400,29 @@ def calibrate_board():
 #       Physical Y Axis = Image Column Axis = Chess Board Rank Axis
 #       Physical X Axis = Image Row Axis    = Chess Board File Axis
 #
+#   Array Board[xinfo,yinfo,pix_inches,file_rank]
+#       where
+#           xinfo   yinfo   pix_inches  file_rank   Comments
+#           -----   -----   ----------  ---------   --------
+#           row     col         0          0        row/col center loc of files
+#           row     col         0          1        row/col loc of ranks
+#           x       y           1          0        x/y center loc of files
+#           x       y           1          1        x/y center loc of ranks
+#
     global Image, Inten
-    global X0,Y0,Z0
     global Laser_x_loc, Laser_y_loc
     global Row_inches, Col_inches
     global Zero_location_col
     global Zero_location_row
     global Col_scal
+    global Board
+    global Squares_x_location
+    global Squares_y_location
+    global Chess_board
+    global Eng_mode, Plt_mode
+    global A8_boardcorner_row, A8_boardcorner_col
+    global H1_boardcorner_row, H1_boardcorner_col
+    
 
     (rows,cols) = Inten.shape
     if Eng_mode : print 'Size of full Image: ',rows,',',cols
@@ -304,9 +450,9 @@ def calibrate_board():
     dy_array = abs(crop_img[:,1:]-crop_img[:,:-1])
     dy_sum = np.sum(dy_array,0)
     
-    if Eng_mode :
+    if Plt_mode :
         fig, ax = plt.subplots(nrows = 3, ncols = 3)
-        ax[0,0].imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
+        ax[0,0].imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,croupdate_chess_boardp_row], cmap='gray')
         ax[0,0].set_title('Chess Board Image')
         ax[0,1].plot(bins[1:],n)
         ax[0,1].set_title('Intensity Histogram')            
@@ -317,7 +463,7 @@ def calibrate_board():
         
     n, bins = np.histogram(dy_sum, bins=100)
     norm = np.float16(np.add.accumulate(n))/np.sum(n)
-    if Eng_mode :
+    if Plt_mode :
         ax[1,2].set_title('Cummulative Histogram of dY sum')
         ax[1,2].plot(bins[1:],norm)
        
@@ -327,27 +473,27 @@ def calibrate_board():
     threshold = int(0.9 * max(delta_dy_peaks))
     squares_y_location1 = np.ravel(dy_peaks[np.argwhere(delta_dy_peaks>threshold)])
     squares_y_location2 = np.ravel(dy_peaks[np.argwhere(delta_dy_peaks>threshold)+1])
-    squares_y_location  = (squares_y_location1[:-1]+squares_y_location2[1:])/2
-    squares_y_location  = np.append([squares_y_location1[0]],[squares_y_location])
-    squares_y_location  = np.append([squares_y_location],[squares_y_location2[-1]])
+    Squares_y_location  = (squares_y_location1[:-1]+squares_y_location2[1:])/2 + 1
+    Squares_y_location  = np.append([squares_y_location1[0]+1],[Squares_y_location])
+    Squares_y_location  = np.append([Squares_y_location],[squares_y_location2[-1]])
     if Eng_mode :
         print 'Clip : ',clip,' dY level > : ',clip_lev
-        print 'Threshold : ',threshold
+        print 'Col Separation Threshold Between Peaks : ',threshold
         print 'Col location of Rank Boundary Peaks : ',dy_peaks,' Shape: ',dy_peaks.shape
-        print 'Difference : ',dy_peaks[1:]-dy_peaks[:-1]
-        print 'Selected Peaks: ',squares_y_location
-        print '# of Ranks detected: ',len(squares_y_location)-1
+        print 'Col Difference between Peaks : ',dy_peaks[1:]-dy_peaks[:-1]
+        print 'Selected Peaks: ',Squares_y_location
+        print '# of Ranks detected: ',len(Squares_y_location)-1
  
     dx_array = abs(crop_img[1:,:]-crop_img[:-1,:])
     dx_sum = np.sum(dx_array,1)
-    if Eng_mode :
+    if Plt_mode :
         ax[2,0].imshow(dx_array, aspect='equal', extent=[0,crop_col*Col_scal,0,(crop_row-1)], cmap='gray')
         ax[2,0].set_title('dX Image')
         ax[2,1].plot(np.arange(crop_row-1),dx_sum)
-        ax[2,1].set_title('peaks are File Boundaries')
+        ax[2,1].set_title('peaks are Row/File Boundaries')
     n, bins = np.histogram(dx_sum, bins=100)
     norm = np.float16(np.add.accumulate(n))/np.sum(n)
-    if Eng_mode :
+    if Plt_mode :
         ax[2,2].set_title('Cummulative Histogram of dX sum')
         ax[2,2].plot(bins[1:],norm)
     
@@ -357,29 +503,30 @@ def calibrate_board():
     threshold = int(0.9 * max(delta_dx_peaks))
     squares_x_location1 = np.ravel(dx_peaks[np.argwhere(delta_dx_peaks>threshold)])
     squares_x_location2 = np.ravel(dx_peaks[np.argwhere(delta_dx_peaks>threshold)+1])
-    squares_x_location  = (squares_x_location1[:-1]+squares_x_location2[1:])/2
-    squares_x_location  = np.append([squares_x_location1[0]],[squares_x_location])
-    squares_x_location  = np.append([squares_x_location],[squares_x_location2[-1]])
+    Squares_x_location  = (squares_x_location1[:-1]+squares_x_location2[1:])/2
+    Squares_x_location  = np.append([squares_x_location1[0]],[Squares_x_location])
+    Squares_x_location  = np.append([Squares_x_location],[squares_x_location2[-1]])
     if Eng_mode :
         print 'Clip : ',clip,' dX level > : ',clip_lev
-        print 'Threshold : ',threshold
+        print 'Row Separation Threshold Between Peaks: ',threshold
         print 'Row location of Row/File Boundary Peaks : ',dx_peaks,' Shape: ',dx_peaks.shape
-        print 'Difference : ',dx_peaks[1:]-dx_peaks[:-1]
-        print 'Selected Peaks: ',squares_x_location
-        print '# of Files detected: ',len(squares_x_location)-1
-    
+        print 'Row Difference Between Peaks: ',dx_peaks[1:]-dx_peaks[:-1]
+        print 'Selected Peaks: ',Squares_x_location
+        print '# of Files detected: ',len(Squares_x_location)-1
+    if Plt_mode :
         plt.show()
+        plt.close()       # free up memory
     
-    A8_boardcorner_col = max(squares_y_location)
-    A8_boardcorner_row = min(squares_x_location)
-    H1_boardcorner_col = min(squares_y_location)
-    H1_boardcorner_row = max(squares_x_location)
+    A8_boardcorner_col = max(Squares_y_location)
+    A8_boardcorner_row = min(Squares_x_location)
+    H1_boardcorner_col = min(Squares_y_location)
+    H1_boardcorner_row = max(Squares_x_location)
     Col_inches = no_ysqs*sq_yd/(A8_boardcorner_col-H1_boardcorner_col)
     Row_inches = no_xsqs*sq_xd/(H1_boardcorner_row-A8_boardcorner_row)
     Col_scal = Col_inches / Row_inches
 
-    files_c = np.float16(squares_x_location[1:]+squares_x_location[:-1])*0.5
-    ranks_c = np.float16(squares_y_location[1:]+squares_y_location[:-1])*0.5
+    files_c = np.float16(Squares_x_location[1:]+Squares_x_location[:-1])*0.5
+    ranks_c = np.float16(Squares_y_location[1:]+Squares_y_location[:-1])*0.5
 
     if Eng_mode :   
         print 'File centers : ', files_c   
@@ -409,16 +556,154 @@ def calibrate_board():
 
     board_img = np.copy(Inten)
     board_img[A8_boardcorner_row:H1_boardcorner_row,H1_boardcorner_col:A8_boardcorner_col]=0.0
-    board_img[squares_x_location,:] = 1.0
-    board_img[:,squares_y_location] = 1.0
+    board_img[Squares_x_location,:] = 1.0
+    board_img[:,Squares_y_location] = 1.0
     
-    if Eng_mode :
+    if Plt_mode :
         plt.imshow(board_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
         plt.show()
+        plt.close()       # free up memory
         plt.imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
         plt.show()
+        plt.close()       # free up memory
+
+    update_chess_board()
+    print_chess_board()
     
     return
+
+def get_square_image(square,r_bord,c_bord,show_img) :
+#
+#   returns the cropped image of square
+#
+    global Board
+    global Image, Inten, Sq_img
+    global Col_scal
+    global Squares_x_location
+    global Squares_y_location
+    global Eng_mode, Plt_mode
+
+    file_list = 'abcdefgh'
+    rank_list = '12345678'
+    error = 0
+
+    square = square.lower()
+    
+    if len(square) == 2 :
+        if square[0] in file_list :
+            file_n = file_list.index(square[0])
+            if square[1] in rank_list :
+                rank_n = rank_list.index(square[1])
+                row_c = Board[file_n,rank_n,0,0]
+                col_c = Board[file_n,rank_n,0,1]
+                r1 = int (Squares_x_location[file_n] + r_bord)
+                r2 = int (Squares_x_location[file_n+1] - r_bord)
+                c1 = int (Squares_y_location[rank_n] + c_bord)
+                c2 = int (Squares_y_location[rank_n+1] - c_bord)
+                Sq_img = np.copy(Inten[r1:r2,c1:c2])
+                (rows,cols) = Sq_img.shape 
+        
+                if (Plt_mode & show_img) :
+                    plt.imshow(Sq_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+                    plt.show()
+                    plt.close()       # free up memory
+
+                code = determine_chess_piece(square)
+            else :
+                error = 1                
+        else :
+            error = 1                         
+    else :
+        error = 1
+
+    if error :
+        print 'Invalid chess square : ',square
+        crol_img = Inten
+        code = [0,0]
+
+    return code
+
+def get_kurtosis(data) :
+#
+#       calculates the Kurtosis of the data
+#
+
+    mean = np.mean(data)
+    var  = np.var(data)
+    mom4 = np.sum(np.power((data-mean),4))
+#    kurt = mom4 / var / var
+
+    return  mom4
+
+def determine_chess_piece(sq) :
+#
+#   analysis image to determine the following
+#
+#   Code    =  [1,1] : no pieces or objects on the square
+#           =  [0,0] : cannot determine identity of object
+#           =  [2,0] : white chess piece on square but cannot determine identity
+#           =  [3,0] : black chess piece on square but cannot determine identity
+#           =  [2,n] or [3,n] : where n = 7 for King, 6 for Queen, 5 for Rook
+#                               4 for Bishop, 3 for Knight and 2 for Pawn
+#
+#   Use various characteristics of image to determine what piece in the image
+#
+#   img_char[0] : mean intensity
+#   img_char[1] : standard deviation intensity
+#   img_char[2] : kurtosis of intensity 
+#   img_char[3] : normalized std. (std/avg)
+#   img_char[4] : range in intensity (max-min)
+#
+#
+    global Sq_img
+    global Eng_mode, Plt_mode
+    
+    empty_th  = 0.025
+    low_contr = 0.6
+    low_kurt  = 10.0
+
+    sq = sq.lower()
+    if len(sq) <> 2 :
+        sq = 'd1'
+
+    inten_dev = np.std(Sq_img)
+    inten_avg = np.mean(Sq_img)
+    inten_kurt = get_kurtosis(Sq_img)
+    inten_range = np.max(Sq_img) - np.min(Sq_img)
+    
+    if inten_avg <> 0.0 :
+        norm_dev = inten_dev / inten_avg
+    else :
+        norm_dev = 1.0
+
+    if inten_dev < empty_th :        # square must be empty
+        code = [1,1]
+    elif ((inten_range < low_contr) & (inten_kurt < low_kurt)):
+        if (sq[0] in ['a','c','e','g']) & (sq[1] in ['1','3','5','7']) :        # dark piece
+            code = [3,0]
+        elif (sq[0] in ['b','d','f','h']) & (sq[1] in ['2','4','6','8']) :      # dark piece
+            code = [3,0]
+        else :
+            code = [2,0]                                                        # light piece
+    else :
+        if (sq[0] in ['a','c','e','g']) & (sq[1] in ['1','3','5','7']) :        # light piece
+            code = [2,0]
+        elif (sq[0] in ['b','d','f','h']) & (sq[1] in ['2','4','6','8']) :      # light piece
+            code = [2,0]
+        else :
+            code = [3,0]                                                        # dark piece
+
+    if Eng_mode :
+        print 'Avg. Inten: {0:.3f}, Std. Inten: {1:.3f}, Kurtosis: {2:.3f}'.format(inten_avg,inten_dev,inten_kurt)
+        print 'Normalized Std : {0:.3f}, Range : {1:.3f} '.format(norm_dev,inten_range)
+        print 'Max inten: {0:.3f}, Min inten: {1:.3f}'.format(np.max(Sq_img),np.min(Sq_img))
+        print 'Code : ',code
+        
+    if Plt_mode :
+        clip = plot_inten_hist(Sq_img)    
+        plot_derivative_img(Sq_img)           
+
+    return code
 
 def calibrate_arm_location() :
 
@@ -437,7 +722,7 @@ def calibrate_arm_location() :
 #   turn on laser and capture image
 #
     GPIO.output(22, 1)
-    capture_Image(1)
+    capture_image(1,'all')
 #
 #   find laser spot
 #
@@ -686,17 +971,6 @@ def chess_move(move)    :
         
     return
 
-def get_square_image(square)
-#
-#  crops the image of the chess square and returns cropped image
-#
-    global Board
-    global Image, Inten
-
-    c_imag = Inten
-    
-    return c_img
-
 def absolute_coordinate_moves() :
 
 #   User coordinates use the front left bottom corner as 0,0,0 while machine coordinates use back left bottom as 0,0,0
@@ -750,7 +1024,7 @@ def absolute_coordinate_moves() :
         strin = raw_input (prompt);
     return
 
-def capture_Image (img_type) :
+def capture_image (img_type,scope) :
 
 #
 #   captures a new Image and returns a normalized Image file
@@ -764,18 +1038,25 @@ def capture_Image (img_type) :
 #
     global Image, Inten
     global Ncols, Nrows
+    global A8_boardcorner_row, A8_boardcorner_col
+    global H1_boardcorner_row, H1_boardcorner_col
     
     camera.capture('binary.rgb',format = 'rgb', resize = (Ncols,Nrows))
 #   camera.capture('binary.rgb',format = 'rgb')
     Image = np.fromfile('binary.rgb',np.uint8, -1, '')
     Image = Image.reshape(Nrows,Ncols,3)
-
+    
     if img_type in [1,2,3] :
         Inten = np.float16(Image[:,:,img_type-1])
     else :
         Inten = np.float16(Image[:,:,0]) + np.float16(Image[:,:,1]) + np.float16(Image[:,:,2])
         
     Inten = (Inten-np.min(Inten))/(np.max(Inten) - np.min(Inten))
+
+    if scope == 'board' :
+        board_max = np.max(Inten[A8_boardcorner_row:H1_boardcorner_row,H1_boardcorner_col:A8_boardcorner_col])
+        board_min = np.min(Inten[A8_boardcorner_row:H1_boardcorner_row,H1_boardcorner_col:A8_boardcorner_col])
+        Inten[A8_boardcorner_row:H1_boardcorner_row,H1_boardcorner_col:A8_boardcorner_col] = (Inten[A8_boardcorner_row:H1_boardcorner_row,H1_boardcorner_col:A8_boardcorner_col]-board_min)/(board_max - board_min)
 
     return
 
@@ -814,7 +1095,9 @@ def laser_on_off(value) :
 #   To Run program in diagnostics mode set Eng_mode to 1
 #   For audio feedback set Talk_mode to 1
 #
+
 Eng_mode = 0
+Plt_mode = 0
 Talk_mode = 0
 #
 #   Co-ordinate convention
@@ -870,10 +1153,13 @@ Zero_location_row = 0
 #               d = 0 : row location (p=0) or x location in inches (p=1)
 #                   1 : col location (p=0) or y location in inches (p=1)
 
-Board = np.float16(np.zeros((8,8,2,2)))
+Board = np.zeros([8,8,2,2])
 Piece_hts = [2.0,2.0,2.25,2.25,2.25,2.25]     # ht of piece above plane of board - k,q,r,b,k,p
 Hover_ht  = 4.00                              # ht of magnet above plane of board when holding piece
 Captured_piece_loc = [6.0,14.5]
+Chess_board = np.zeros([8,8,2],dtype=int)
+Color_code = ['X','0','W','B']
+Piece_code = ['X','0','P','K','B','R','Q','K']
 #   GPIO setup
 #       use board numbering of the GPIO pins
 #       turn off warnings
@@ -904,10 +1190,12 @@ GPIO.setup(38, GPIO.OUT,initial = 0)
 #           ncols = 1080
 #           nrows = 1920
 #           col_scal = 3.0 
-
 Nrows = 1920
 Ncols = 1088
 Col_scal = 3.0
+#
+#   setup camera
+#
 camera = picamera.PiCamera()
 camera.rotation = 0
 camera.preview_fullscreen = 0
@@ -926,14 +1214,26 @@ try:
     prompt = raw_input('Enter y to run in Engineering Mode : ')
     if prompt.lower() == 'y' :
         Eng_mode = 1
-        print '*** running in Engineering Mode ***'
+        try:
+            prompt = raw_input('Enter y to run in Engineering Mode without Plots : ')
+            if prompt.lower() == 'y' :
+                Plt_mode = 0
+                print '*** running in Engineering Mode with Plotting Off ***'
+            else :
+                Plt_mode = 1
+                print '*** running in Engineering Mode with Plotting On ***'
+        except ValueError:
+            Plt_mode = 1
+            print '*** running in Engineering Mode with Plotting On ***'
     else :
         Eng_mode = 0
+        Plt_mode = 0
 except ValueError:
     Eng_mode = 0
-
+    Plt_mode = 0
+    
 try:
-    prompt = raw_input('Enter y to run in Taling Mode : ')
+    prompt = raw_input('Enter y to run in Talking Mode : ')
     if prompt.lower() == 'y' :
         Talk_mode = 1
         print '*** running in Talking Mode ***'
@@ -949,6 +1249,7 @@ if Talk_mode :
 prompt = "Main Command (? for list of commands) : "
 cmdlst =          "    cal      : auto calibrate board, chess squares and Image scales\n"
 cmdlst = cmdlst + "    arm      : calibrate arm location\n"
+cmdlst = cmdlst + "    ref_b    : refreshed chess board position and prints it\n"
 cmdlst = cmdlst + "    loc      : outputs current location of magnet\n"
 cmdlst = cmdlst + "    mo       : move magnet using abolute coordiates or chess square coordinates\n"
 cmdlst = cmdlst + "    magon    : turn on magnet\n"
@@ -956,15 +1257,32 @@ cmdlst = cmdlst + "    magoff   : turn off magnet\n"
 cmdlst = cmdlst + "    laseron  : turn on Laser\n"
 cmdlst = cmdlst + "    laseroff : turn off Laser\n"
 cmdlst = cmdlst + "    im       : to capture and save JPG Image\n"
+cmdlst = cmdlst + "    sq_img   : show image of a chess square\n"
 cmdlst = cmdlst + "    anal     : capture Image for manual board analysis\n"
 cmdlst = cmdlst + "    grbl     : enter in GRBL command to CNC\n"
 cmdlst = cmdlst + "    q        : to quit program"
 
 #   view video until quit command is entered for Arduino
 
-camera.start_preview()
 time.sleep(2)
-capture_Image(0)
+capture_image(0,'all')
+
+if Eng_mode :
+    Eng_mode = 0
+    if Plt_mode :
+        Plt_mode = 0
+        calibrate_board()
+        Eng_mode = 1
+        Plt_mode = 1
+    else :
+        calibrate_board()
+        Eng_mode = 1    
+else :
+    calibrate_board()
+    
+camera.start_preview()
+
+Sq_image = np.copy(Inten)
 
 strin = raw_input (prompt);
 while (strin.lower() != "q"):
@@ -975,9 +1293,32 @@ while (strin.lower() != "q"):
         print cmdlst
     elif (strin.lower() == "cal") :
         if Talk_mode : talk('OK, will go into calibration mode')
-        capture_Image(0)
+        capture_image(0,'all')
         camera.stop_preview()
         calibrate_board()
+        camera.start_preview()
+    elif (strin.lower() == "sq_img") :
+        camera.stop_preview()
+        sq = raw_input('Which square to view (e.g. a6, e8) ? ')
+        r_bord = 5
+        c_bord = 3
+        while len(sq) == 2 :
+            code = get_square_image(sq,r_bord,c_bord,1)
+            sq = raw_input('Which square to view (e.g. a6, e8) ? ')
+#            if Eng_mode :
+#                try:
+#                    r_bord = input('Enter row border : ')
+#                except EOFError:
+#                    print 'Use row border of ',r_bord
+#                try:
+#                    c_bord = input('Enter col border : ')
+#                except EOFError:
+#                    print 'Use col border of ',c_bord
+        camera.start_preview()        
+    elif (strin.lower() == "ref_b") :
+        camera.stop_preview()
+        update_chess_board()
+        print_chess_board()
         camera.start_preview()
     elif (strin.lower() == "magon") :
         magnet_on_off(1)
