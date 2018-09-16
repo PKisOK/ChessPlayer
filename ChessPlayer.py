@@ -11,13 +11,16 @@
 #                   use the Configuration option from the pull down menu
 #                   Then reboot.
 #
-#   Install libray (one time only)
+#   Install libray (one time only, make sure WiFi in connected)
 #
-#   sudo apt-get update    (makes sure you have latest updates, run 2/6/2017)
+#   sudo apt-get dist-upgrade
+#   sudo apt-get update    (makes sure you have latest updates, run 8/5/2018)
+#   sudo apt-get upgrade
 #   sudo apt-get install python3-picamera
 #   sudo apt-get install python-numpy
 #   sudo apt-get install python-matplotlib
 #   sudo apt-get install python-scipy
+#   sudo apt-get install python-opencv
 #
 
 import os
@@ -26,8 +29,10 @@ import serial
 import RPi.GPIO as GPIO
 import numpy as np
 import matplotlib.pyplot as plt
+#from scipy.interpolate import interp1d
 import time
 import math
+import cv2
 
 def talk(cmd):
     saycmd = "echo " + cmd + " | festival --tts"
@@ -139,6 +144,9 @@ def plot_inten_hist(img) :
     ax[1].set_title('Inten Hist')
     ax[1].plot(bins[1:],n)
     norm = np.float16(np.add.accumulate(n))/np.sum(n)
+    #s_cum = interp1d(bins[1:],norm,kind='cubic')
+    #ax[2].set_title('Smootherd Cum Inten Hist')
+    #ax[2].plot(s_cum[:,0],s_cum[:,1])
     ax[2].set_title('Cum Inten Hist')
     ax[2].plot(bins[1:],norm)
     plt.show()
@@ -167,22 +175,45 @@ def plot_inten_hist(img) :
     return clip
 
 
-def plot_derivative_img(img) :
+def plot_derivative_img(img,der_type) :
+#
+#   img : input image
+#   der_type : type of derivative to perform on image
+#
 
     global Eng_mode, Plt_mode
     
     rows,cols = img.shape
+#    print 'Size of img : ',img.shape
 
-    dx_array = abs(img[:,1:]-img[:,:-1])
-    dy_array = abs(img[1:,:]-img[:-1,:])
+    if der_type == 1 :  #   perform Laplacian gradient of the image
+        img_scal = np.int16((img - np.min(img))/(np.max(img)-np.min(img))*255)
+        dXdY_array = cv2.Laplacian(img_scal,cv2.CV_16S)
+        dXdY_array = np.absolute(dXdY_array)
+        label = 'Absolute Laplacian Image'
+#        dXdY_array = np.absolute((dXdY_array - np.min(dXdY_array))/(np.max(dXdY_array)-np.min(dXdY_array)))
+#        label = 'Laplacian Image'
+        rows,cols = dXdY_array.shape
+    elif der_type == 2 : #   perform Adaptive Gaussian Thresholding of the image
+        img_scal = np.uint8((img - np.min(img))/(np.max(img)-np.min(img))*255)
+        img_scal = cv2.medianBlur(img_scal,3)
+        dXdY_array = cv2.adaptiveThreshold(img_scal,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
+            cv2.THRESH_BINARY,5,2)
+        rows,cols = dXdY_array.shape
+        label = 'Adapt Gaussian Thresh Image'
+    else :              # my x-y derivative
+        dx_array = abs(img[:,1:]-img[:,:-1])
+        dy_array = abs(img[1:,:]-img[:-1,:])
+        dXdY_array = dx_array[:-1,:] + dy_array[:,:-1]
 #        dx_sum = np.array([np.arange(cols-1),np.sum(dx_array,0)]).T
 #        dy_sum = np.array([np.arange(rows-1),np.sum(dy_array,1)]).T
-    dXdY_array = dx_array[:-1,:] + dy_array[:,:-1]
+        label = 'Derivative Image'
+
 
     if Plt_mode :
         fig, ax = plt.subplots(nrows = 1, ncols = 3)
                 
-        ax[0].set_title('Derivative Image')
+        ax[0].set_title(label)
         ax[0].imshow(dXdY_array, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
 
         n, bins = np.histogram(dXdY_array, bins=100)
@@ -325,7 +356,7 @@ def board_analysis():
         elif (strin.lower() == "sq") :
             sq = raw_input('Which square to view and create cropped image (e.g. a6, e8) ? ')
             if len(sq) == 2 :
-                code = get_square_image(sq,5,3,0)
+                code = get_square_image(sq,0)
                 crop_img = np.copy(Sq_img)
             else :
                 print 'Square (',sq,') not recognized'
@@ -336,7 +367,8 @@ def board_analysis():
         elif (strin.lower() == "c") :
             (low_x,low_y,hi_x,hi_y,crop_img) = crop_image(low_x,low_y,hi_x,hi_y)
         elif (strin.lower() == "der") :
-            plot_derivative_img(crop_img)           
+            der_t = input('Type of derivative (0: x-y, 1: Laplacian, 2: Adaptive Gaussian Thresh) = ')
+            plot_derivative_img(crop_img,der_t)           
         else :
             print cmdlst
         strin = raw_input (prompt);
@@ -354,7 +386,7 @@ def update_chess_board() :
     for f in range(8) :
         for r in range(8):
             sq = file_list[f] + rank_list[r]
-            code = get_square_image(sq,5,3,0)
+            code = get_square_image(sq,0)
             Chess_board[f][r] = code            
     return
 
@@ -404,10 +436,10 @@ def calibrate_board():
 #       where
 #           xinfo   yinfo   pix_inches  file_rank   Comments
 #           -----   -----   ----------  ---------   --------
-#           row     col         0          0        row/col center loc of files
-#           row     col         0          1        row/col loc of ranks
-#           x       y           1          0        x/y center loc of files
-#           x       y           1          1        x/y center loc of ranks
+#           row     col         0          0        row & col center loc of files in units of pixels
+#           row     col         0          1        row & col center loc of ranks in units of pixels
+#           x       y           1          0        x & y center loc of files in units of inches ( 0,0 is lower left hand corner of board - a1 square)
+#           x       y           1          1        x & y center loc of ranks in units of inches
 #
     global Image, Inten
     global Laser_x_loc, Laser_y_loc
@@ -452,7 +484,7 @@ def calibrate_board():
     
     if Plt_mode :
         fig, ax = plt.subplots(nrows = 3, ncols = 3)
-        ax[0,0].imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,croupdate_chess_boardp_row], cmap='gray')
+        ax[0,0].imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
         ax[0,0].set_title('Chess Board Image')
         ax[0,1].plot(bins[1:],n)
         ax[0,1].set_title('Intensity Histogram')            
@@ -572,7 +604,7 @@ def calibrate_board():
     
     return
 
-def get_square_image(square,r_bord,c_bord,show_img) :
+def get_square_image(square,show_img) :
 #
 #   returns the cropped image of square
 #
@@ -586,6 +618,8 @@ def get_square_image(square,r_bord,c_bord,show_img) :
     file_list = 'abcdefgh'
     rank_list = '12345678'
     error = 0
+    r_bord = 8      # row border
+    c_bord = 3      # col border
 
     square = square.lower()
     
@@ -603,7 +637,7 @@ def get_square_image(square,r_bord,c_bord,show_img) :
                 Sq_img = np.copy(Inten[r1:r2,c1:c2])
                 (rows,cols) = Sq_img.shape 
         
-                if (Plt_mode & show_img) :
+                if (show_img) :
                     plt.imshow(Sq_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
                     plt.show()
                     plt.close()       # free up memory
@@ -646,35 +680,69 @@ def determine_chess_piece(sq) :
 #           =  [2,n] or [3,n] : where n = 7 for King, 6 for Queen, 5 for Rook
 #                               4 for Bishop, 3 for Knight and 2 for Pawn
 #
-#   Use various characteristics of image to determine what piece in the image
+#   Use various features of image to determine what chess piece is in the image
 #
-#   img_char[0] : mean intensity
-#   img_char[1] : standard deviation intensity
-#   img_char[2] : kurtosis of intensity 
-#   img_char[3] : normalized std. (std/avg)
-#   img_char[4] : range in intensity (max-min)
-#
+#   Img_feat[0,0] : chess piece color (1: white, 0: black)
+#   Img_feat[0,1] : chess piece (1:empty, 2: pawn, 3: knight, 4: bishop, 5:rook, 6: queen, 7: king)
+#   Img_feat[0,2] : chess square (11 : a1, 12:a2, 21: b1, etc up to 88: h8)
+#   Img_feat[0,3] : color of chess square (1: white, 0: black)
+#   Img_feat[0,4] : radial distance of mid point of square to center of chess board (in inches)
+#   Img_feat[0,5] : angle of radial line with the X-axis (chess file direction or image row direction)
+#   Img_feat[0,6] : mean intensity of image
+#   Img_feat[0,7] : standard deviation intensity of image
+#   Img_feat[0,8] : kurtosis of intensity of image
+#   Img_feat[0,9] : normalized std. (std/avg)
+#   Img_feat[0,10]: range in intensity (max-min)
+#   Img_feat[0,11]: pixel footprint of object as % of total pixels in image as determined by image threshold analysis
+#   Img_feat[0,12]: radius of the base of object as determined by the derivative image analysis
+#   Img_feat[0,13]: radius of the crown of object as determined by the derivative image analysis
+#   Img_feat[0,14]: radius of the waist of object as determined by the derivative image analysis
+#   Img_feat[0,15]: reserved for future use
+#   Img_feat[0,16]: reserved for future use
+#   Img_feat[0,17]: reserved for future use
+#   Img_feat[0,18]: reserved for future use
+#   Img_feat[0,19]: reserved for future use
 #
     global Sq_img
     global Eng_mode, Plt_mode
+    global Img_feat, Img_feat_header
+
     
     empty_th  = 0.025
     low_contr = 0.6
     low_kurt  = 10.0
 
+    file_list = 'abcdefgh'
+    rank_list = '12345678'
+
+
     sq = sq.lower()
     if len(sq) <> 2 :
         sq = 'd1'
+        
+    file_n = file_list.index(sq[0])
+    rank_n = rank_list.index(sq[1])
 
-    inten_dev = np.std(Sq_img)
-    inten_avg = np.mean(Sq_img)
-    inten_kurt = get_kurtosis(Sq_img)
-    inten_range = np.max(Sq_img) - np.min(Sq_img)
+    Img_feat[0,2] = (file_n+1)*10 + rank_n + 1
+
+    if (sq[0] in ['a','c','e','g']) & (sq[1] in ['1','3','5','7']) :        # dark square
+        Img_feat[0,3] = 0.0
+    elif (sq[0] in ['b','d','f','h']) & (sq[1] in ['2','4','6','8']) :      # dark square
+        Img_feat[0,3] = 0.0
+    else :                                                                  # light square
+        Img_feat[0,3] = 1.0
+    
+    Img_feat[0,6] = inten_avg = np.mean(Sq_img)
+    Img_feat[0,7] = inten_dev = np.std(Sq_img)
+    Img_feat[0,8] = inten_kurt = get_kurtosis(Sq_img)
     
     if inten_avg <> 0.0 :
         norm_dev = inten_dev / inten_avg
     else :
         norm_dev = 1.0
+
+    Img_feat[0,9] = norm_dev
+    Img_feat[0,10] = inten_range = np.max(Sq_img) - np.min(Sq_img)
 
     if inten_dev < empty_th :        # square must be empty
         code = [1,1]
@@ -693,6 +761,8 @@ def determine_chess_piece(sq) :
         else :
             code = [3,0]                                                        # dark piece
 
+    
+
     if Eng_mode :
         print 'Avg. Inten: {0:.3f}, Std. Inten: {1:.3f}, Kurtosis: {2:.3f}'.format(inten_avg,inten_dev,inten_kurt)
         print 'Normalized Std : {0:.3f}, Range : {1:.3f} '.format(norm_dev,inten_range)
@@ -701,7 +771,7 @@ def determine_chess_piece(sq) :
         
     if Plt_mode :
         clip = plot_inten_hist(Sq_img)    
-        plot_derivative_img(Sq_img)           
+        plot_derivative_img(Sq_img,1)           
 
     return code
 
@@ -728,12 +798,15 @@ def calibrate_arm_location() :
 #
     laser_row,laser_col = find_laser()
 
-#    print 'Laser row,col : {0:.3f} , {1:.3f}'.format(laser_row,laser_col)
+    if Eng_mode :
+        print 'Zero row,col  : {0:.3f} , {1:.3f}'.format(Zero_location_row,Zero_location_col)
+        print 'Laser row,col : {0:.3f} , {1:.3f}'.format(laser_row,laser_col)
     
     laser_x_loc = (laser_row-Zero_location_row) * Row_inches
     laser_y_loc = (laser_col-Zero_location_col) * Col_inches
 
-#    print 'Laser location (x,y) {0:.3f} , {1:.3f} : '.format(laser_x_loc,laser_y_loc)
+    if Eng_mode :
+        print 'Laser location (x,y) {0:.3f} , {1:.3f} : '.format(laser_x_loc,laser_y_loc)
 #
 #   confirm Z height of laser
 #
@@ -751,28 +824,32 @@ def calibrate_arm_location() :
     else :
         phi   = math.pi*0.5
 
-#    print 'theta, phi : {0:.3f}, {1:.3f}'.format(theta,phi)
+    if Eng_mode :
+        print 'theta, phi : {0:.3f}, {1:.3f}'.format(theta,phi)
     
     if theta == math.pi*0.5 :
         shadow = 0
     else :
         shadow = laser_ht / math.tan(theta)
 
-#    print 'shadow : {0:.3f}'.format(shadow)
+    if Eng_mode :
+        print 'shadow : {0:.3f}'.format(shadow)
     
-    laser_actual_loc = Magnet_actual_loc
-    laser_actual_loc[0] = laser_x_loc - shadow*math.sin(phi)
-    laser_actual_loc[1] = laser_y_loc - shadow*math.cos(phi)
-    laser_actual_loc[2] = 0.0
+    laser_zero_plane_loc = Magnet_actual_loc
+    laser_zero_plane_loc[0] = laser_x_loc - shadow*math.sin(phi)
+    laser_zero_plane_loc[1] = laser_y_loc - shadow*math.cos(phi)
+    laser_zero_plane_loc[2] = 0.0
 
-#    print 'magnet loc ',Magnet_actual_loc
-#    print 'mag2laser offset ',Magnet2laser_offset
+    if Eng_mode :
+        print 'prev magnet loc ',Magnet_actual_loc
+        print 'mag2laser offset ',Magnet2laser_offset
     
-    Magnet_actual_loc = np.add(laser_actual_loc, Magnet2laser_offset)
-
-#    print 'magnet loc ',Magnet_actual_loc
-    
+    Magnet_actual_loc = np.add(laser_zero_plane_loc, Magnet2laser_offset)
     Magnet_actual_loc[2] = Magnet_actual_loc[2] + laser_ht
+
+    if Eng_mode :
+        print 'new magnet loc ',Magnet_actual_loc
+    
     X0 = Magnet_actual_loc[0]
     Y0 = Magnet_actual_loc[1]
 
@@ -1048,8 +1125,8 @@ def capture_image (img_type,scope) :
     
     if img_type in [1,2,3] :
         Inten = np.float16(Image[:,:,img_type-1])
-    else :
-        Inten = np.float16(Image[:,:,0]) + np.float16(Image[:,:,1]) + np.float16(Image[:,:,2])
+    else :                              # convert RGB to luminosity gray scale 
+        Inten = np.float16(Image[:,:,0])*0.3 + np.float16(Image[:,:,1])*0.59 + np.float16(Image[:,:,2])*0.11
         
     Inten = (Inten-np.min(Inten))/(np.max(Inten) - np.min(Inten))
 
@@ -1095,22 +1172,36 @@ def laser_on_off(value) :
 #   To Run program in diagnostics mode set Eng_mode to 1
 #   For audio feedback set Talk_mode to 1
 #
-
 Eng_mode = 0
 Plt_mode = 0
 Talk_mode = 0
 #
+#   Board Orientation
+#       Board_O  =  0 : human will play with white pieces from side  of CNC machine/robot (default)
+#                   1 : human will play with black pieces from side  of CNC machine/robot
+#                   2 : human will play with white pieces from front of CNC machine/robot
+#                   3 : human will play with black pieces from front of CNC machine/robot
+#
+Board_O = 0
+#
 #   Co-ordinate convention
-#       zero location will be near chess square A1
-#       x axis runs in file direction from a file to h file
-#       y axis runs in rank direction from first rant to 8th rank
+#       physical zero location is fixed indendent of board oriention and will be located at
+#           Board_O =   0 : zero is upper left corner of A8 square
+#                       1 : zero is lower right corner of H1 square
+#                       2 : zero is lower left corner of A1 square
+#                       3 : zero is upper right corner of H8 square
+#       x axis runs reverse direction but parallel camera row axis
+#       y axis runs same direction and parallel to camera column axis
 #       z axis runs upward toward camera with zero being near the board
 #
 #       CNC reliable operation motion limits in inches once initial location
 #       has been calibrated correctly.  CNC will stop working and possible get
 #       damaged if operated beyond these limits.
 #
-XYZ_limits = [[0.0,12.0],[0.0,15.0],[0.0,3.25]]
+#       Stage locations as tracked by X0, Y0 and Z0 are kept within these limits
+#           Locations are calibrated during the setup phase
+#
+XYZ_limits = [[0.0,12.0],[0.0,15.0],[0.0,3.50]]
 #       CNC backlash correction in inches (neg. to pos. , pos. to neg)
 Z_backlash = [0.0, 0.0]
 X_backlash = [0.06, 0.06]
@@ -1122,13 +1213,39 @@ X_scale = 1.01/25.4
 Z_scale = 1.0/25.4
 CNC_scale = [X_scale,Y_scale,Z_scale]
 #       Vertical Distance (inches) of Pi Camera above center of Chess board
-Camera_height = 24.0 + 1.0/8.0
+Camera_height = 24.0 + 1.0/8.0 - 0.1
 #       offset of laser location from magnet in x,y,z (inches)
-Magnet2laser_offset = [-0.25,0.0,-3.5]
+Magnet2laser_offset = [0.0,-0.5,-3.5]
 #       height of laser about chess board plane (inches) when Z height of arm is 0.0
-Laser_height_0 = 5.25
+Laser_height_0 = 4.75
 #
-#   X0,Y0,Z0 are the current location of the magnet arm in absolute coordinates (units are in inches)
+#   create an array for storing feature properties that will be used to determined identity of chess piece from image
+#
+Img_feat = np.reshape(np.zeros(20),[1,20])
+feat_log = Img_feat
+log_fname = 'testlog.txt'
+Img_feat_header  = 'Piece_Color'
+Img_feat_header += '\tChess_Piece'
+Img_feat_header += '\tChess_Sq'
+Img_feat_header += '\tColor_Sq'
+Img_feat_header += '\tDistance_Ctr'
+Img_feat_header += '\tAngle_Ctr'
+Img_feat_header += '\tInten_Mean'
+Img_feat_header += '\tInten_Std'
+Img_feat_header += '\tInten_Kurtosis'
+Img_feat_header += '\tInten_Norm_Std'
+Img_feat_header += '\tInten_Range'
+Img_feat_header += '\tFootprint'
+Img_feat_header += '\tRadius_Base'
+Img_feat_header += '\tRadius_Crown'
+Img_feat_header += '\tRadius_Waist'
+Img_feat_header += '\treserved'
+Img_feat_header += '\treserved'
+Img_feat_header += '\treserved'
+Img_feat_header += '\treserved'
+Img_feat_header += '\treserved'
+#
+#   X0,Y0,Z0 are the current location of the 3 stages in absolute coordinates (units are in inches)
 #
 X0 = 6.0 
 Y0 = 6.0
@@ -1154,7 +1271,7 @@ Zero_location_row = 0
 #                   1 : col location (p=0) or y location in inches (p=1)
 
 Board = np.zeros([8,8,2,2])
-Piece_hts = [2.0,2.0,2.25,2.25,2.25,2.25]     # ht of piece above plane of board - k,q,r,b,k,p
+Piece_hts = [2.0,2.0,2.25,2.25,2.25,2.25]     # ht of piece above planecalibrate_board of board - k,q,r,b,k,p
 Hover_ht  = 4.00                              # ht of magnet above plane of board when holding piece
 Captured_piece_loc = [6.0,14.5]
 Chess_board = np.zeros([8,8,2],dtype=int)
@@ -1257,7 +1374,9 @@ cmdlst = cmdlst + "    magoff   : turn off magnet\n"
 cmdlst = cmdlst + "    laseron  : turn on Laser\n"
 cmdlst = cmdlst + "    laseroff : turn off Laser\n"
 cmdlst = cmdlst + "    im       : to capture and save JPG Image\n"
-cmdlst = cmdlst + "    sq_img   : show image of a chess square\n"
+cmdlst = cmdlst + "    load_log : load a log file for appending feature analysis data\n"
+cmdlst = cmdlst + "    make_log : create a new log file for storing feature analysis data\n"
+cmdlst = cmdlst + "    sq_img   : analyze image of a chess square and store feature data into log file\n"
 cmdlst = cmdlst + "    anal     : capture Image for manual board analysis\n"
 cmdlst = cmdlst + "    grbl     : enter in GRBL command to CNC\n"
 cmdlst = cmdlst + "    q        : to quit program"
@@ -1297,24 +1416,29 @@ while (strin.lower() != "q"):
         camera.stop_preview()
         calibrate_board()
         camera.start_preview()
+    elif (strin.lower() == "load_log") :
+        log_fname = raw_input('What is name of log file to load? ')
+        feat_log = np.loadtxt(log_fname,delimiter='\t')
+    elif (strin.lower() == "make_log") :
+        log_fname = raw_input('What is name of log file to create? ')
+        np.savetxt(log_fname, feat_log, fmt='%1.4e',delimiter='\t',header= Img_feat_header)
     elif (strin.lower() == "sq_img") :
         camera.stop_preview()
         sq = raw_input('Which square to view (e.g. a6, e8) ? ')
-        r_bord = 5
-        c_bord = 3
+        temp_plt_mode = Plt_mode
+        Plt_mode = 1
+            
         while len(sq) == 2 :
-            code = get_square_image(sq,r_bord,c_bord,1)
+            capture_image(0,'all')
+            code = get_square_image(sq,1)
+            Img_feat[0,0] = input('Color of chess piece (0:black, 1:white) = ')
+            Img_feat[0,1] = input('Chess piece ID (1: empty, 2: pawn, 3: knight, 4: bishop, 5: rook, 6: queen, 7: king) = ')
+            feat_log = np.append(feat_log,Img_feat,axis = 0)
+            np.savetxt(log_fname, feat_log, fmt='%1.2e',delimiter='\t',header= Img_feat_header)
             sq = raw_input('Which square to view (e.g. a6, e8) ? ')
-#            if Eng_mode :
-#                try:
-#                    r_bord = input('Enter row border : ')
-#                except EOFError:
-#                    print 'Use row border of ',r_bord
-#                try:
-#                    c_bord = input('Enter col border : ')
-#                except EOFError:
-#                    print 'Use col border of ',c_bord
-        camera.start_preview()        
+            
+        camera.start_preview()
+        Plt_mode = temp_plt_mode
     elif (strin.lower() == "ref_b") :
         camera.stop_preview()
         update_chess_board()
