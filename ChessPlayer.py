@@ -3,7 +3,10 @@
 #   Program to manually control Rajan's CNC using USB port
 #   while view video from the RPi camera mounted in the CNC arm
 #   and turning on and off the electromagnet using GPIO port to
-#   move chess pieces
+#   move chess pieces using CNC
+#
+#   Added Stockfish chess program to code : 10/31/2018
+#       Source code for chess program : www.chess.fortherapy.co.uk
 #
 #   One time only:  type  sudo raspi-config on Raspian command line and
 #                   select Enable Camera
@@ -38,7 +41,162 @@ from scipy.interpolate import interp1d
 import time, subprocess
 import math
 import cv2
-# from ChessBoard import ChessBoard
+
+# initiate chessboard
+
+from ChessBoard import ChessBoard
+import subprocess, time
+maxchess = ChessBoard()
+
+# initiate stockfish chess engine
+
+engine = subprocess.Popen(
+    'stockfish',
+    universal_newlines=True,
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,)
+
+def get():
+    
+    # using the 'isready' command (engine has to answer 'readyok')
+    # to indicate current last line of stdout
+    stx=""
+    engine.stdin.write('isready\n')
+#    print('\nengine:')
+    while True :
+        text = engine.stdout.readline().strip()
+        if text == 'readyok':
+            break
+#        if text !='':   
+#            print('\t'+text)
+        if text[0:8] == 'bestmove':        
+            return text
+
+def sget():
+    
+    # using the 'isready' command (engine has to answer 'readyok')
+    # to indicate current last line of stdout
+    stx=""
+    engine.stdin.write('isready\n')
+#    print('\nengine:')
+    while True :
+        text = engine.stdout.readline().strip()
+        #if text == 'readyok':
+         #   break
+#        if text !='':   
+#            print('\t'+text)
+        if text[0:8] == 'bestmove':
+            mtext=text
+            return mtext
+def getboard():
+    """ gets a text string from the board """
+    btxt = raw_input("\n Enter a chess move: ").lower()
+    return btxt
+    
+def sendboard(stxt):
+    """ sends a text string to the board """
+#    print("\n send to board: " +stxt)
+
+def newgame():
+
+    global Skill
+    
+    get ()
+    put('uci')
+    get ()
+    put('setoption name Skill Level value ' +Skill)
+    get ()
+    put('setoption name Hash value 128')
+    get()
+    put('setoption name Best Book Move value true')
+    get()
+    put('setoption name OwnBook value true')
+    get()
+    put('uci')
+    get ()
+    put('ucinewgame')
+    maxchess.resetBoard()
+    fmove=""
+    return fmove
+
+
+def bmove(fmove):
+
+    global Movetime
+    global Computer_move
+    
+    """ assume we get a command of the form ma1a2 from board"""    
+    fmove=fmove
+    # Get a move from the board
+    brdmove = bmessage[1:5].lower()
+    # now validate move
+    # if invalid, get reason & send back to board
+      #  maxchess.addTextMove(move)
+    if maxchess.addTextMove(brdmove) == False :
+                        etxt = "error"+ str(maxchess.getReason())+brdmove
+                        maxchess.printBoard()
+                        sendboard(etxt)
+                        return fmove
+                       
+#  elif valid  make the move and send Fen to board
+    
+    else:
+        maxchess.printBoard()
+        # maxfen = maxchess.getFEN()
+        # sendboard(maxfen)
+       # remove line below when working
+        raw_input("\n\nPress the enter key to continue")
+#        print ("fmove")
+#        print(fmove)
+#        print ("brdmove")
+#        print(brdmove)
+        fmove =fmove+" " +brdmove
+
+        cmove = "position startpos moves"+fmove
+#        print (cmove)
+
+            #        if fmove == True :
+            #                move = "position startpos moves "+move
+            #        else:
+            #               move ="position fen "+maxfen
+
+        # put('ucinewgame')
+        # get()
+
+       
+        put(cmove)
+        # send move to engine & get engines move
+
+        
+        put("go movetime " +Movetime)
+        # time.sleep(6)
+        # text = get()
+        # put('stop')
+        text = sget()
+#        print (text)
+        smove = text[9:13]
+        Computer_move = smove
+        hint = text[21:25]
+        if maxchess.addTextMove(smove) != True :
+                        stxt = "e"+ str(maxchess.getReason())+move
+                        maxchess.printBoard()
+                        sendboard(stxt)
+
+        else:
+                        temp=fmove
+                        fmove =temp+" " +smove
+                        stx = smove+hint      
+                        sendboard(stx)
+                        maxchess.printBoard()
+                        # maxfen = maxchess.getFEN()
+                        print ("computer move: " +smove)
+                        return fmove
+        
+
+def put(command):
+#    print('\nyou:\n\t'+command)
+    engine.stdin.write(command+'\n')
+
 
 def talk(cmd):
     saycmd = "echo " + cmd + " | festival --tts"
@@ -1562,7 +1720,7 @@ def absolute_coordinate_moves() :
     cmdlst = cmdlst + "    chess : enter a chess move command\n"    
     cmdlst = cmdlst + "    arm : calibrate arm position using laser (no Z ht. prompt)\n"    
     cmdlst = cmdlst + "    q  : finished return to main menu\n"
-    
+
     strin = raw_input (prompt);
     while (strin.lower() != "q"):    
         if (strin.lower() == "x") : 
@@ -1853,7 +2011,14 @@ cmdlst = cmdlst + "    make_log : create a new log file for storing feature anal
 cmdlst = cmdlst + "    sq_img   : analyze image of a chess square and store feature data into log file\n"
 cmdlst = cmdlst + "    anal     : capture Image for manual board analysis\n"
 cmdlst = cmdlst + "    grbl     : enter in GRBL command to CNC\n"
+cmdlst = cmdlst + "    stock    : play chess against Stockfish chess engine\n"
 cmdlst = cmdlst + "    q        : to quit program"
+
+chess_cmds = "List of chess commands: \n"
+chess_cmds = chess_cmds + "    mxxyy  : chess move where xx is initial square and yy is final square of the move\n"
+chess_cmds = chess_cmds + "              in algebraic notation for chess squares (e.g me2e4 moves piece on e2 to e4\n"
+chess_cmds = chess_cmds + "    n  : start a new chess game\n"   
+chess_cmds = chess_cmds + "    q  : finished chess game, return to main menu\n"
 
 #   view video until quit command is entered for Arduino
 
@@ -1963,6 +2128,28 @@ while (strin.lower() != "q"):
         ser.write('G91 G0 '+strin+'\r\n')
         reply = ser.readline()
         print 'GRBL Reply back: ',reply,
+    elif (strin.lower() == "stock") :       # initiate chess playing program Stockfish
+
+        print ("\n Chess Program \n")
+        print chess_cmds
+        Skill = "10"
+        Movetime = "6000"
+        fmove = newgame()
+        while True:
+
+    # Get  message from board
+            bmessage = getboard()
+    # Message options   Move, Newgame, level, style
+            code = bmessage[0]
+           
+    # decide which function to call based on first letter of txt
+            fmove=fmove
+            if code == 'm': fmove = bmove(fmove)
+            elif code == 'n': newgame()
+            elif code == '?': print chess_cmds
+            elif code == 'q': break
+            else :  sendboard('error at option')
+            
     else :
         if Talk_mode : talk('Do not understand command' + prompt)
         print prompt
