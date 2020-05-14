@@ -41,6 +41,8 @@ from scipy.interpolate import interp1d
 import time, subprocess
 import math
 import cv2
+from collections import Counter
+from PIL import Image as PIL_image
 
 # initiate chessboard
 
@@ -99,12 +101,26 @@ def getboard():
     global Human_move
     
     """ gets a text string from the board """
-    
-    Human_move = raw_input("\n Make move and then enter CNC chess move (syntax ps1-s2 or ps1xps2) : ").lower()
+
+    invalid_cmd = 1
+    prom = "\nMove piece & then enter CNC move (e.g. pe2-e4 or qe1xph5) : "
+
+    while invalid_cmd :
+        try:
+            Human_move = raw_input(prom).lower()
+            if len(Human_move) < 6 :
+                invalid_cmd = 1
+            else :
+                invalid_cmd = 0
+        except ValueError :
+            prom = "Invalid move command. Re-enter move command : "
+            invalid_cmd = 1
+
 
     btxt = translate_CNC2Stockfish_move(Human_move)
 
-    print 'CNC Move Notation = ',Human_move,' Stockfish Move Notation = ',btxt
+    if btxt[0].lower == 'm' :
+        print 'CNC Move Notation = ',Human_move,' Stockfish Move Notation = ',btxt
     
 #    raw_input("\n\nPress the enter key to continue")
     
@@ -250,7 +266,9 @@ def find_laser(box,diff) :
     global Laser_box_col_min, Laser_box_col_max
     global Laser_box_row_min, Laser_box_row_max
     global Ncols,Nrows
-
+    global Confirm_initial_setup
+    global Diag_mode
+    
     if box :
 #
 #   select image box size around previous known location of laser
@@ -319,7 +337,6 @@ def find_laser(box,diff) :
     pixels = np.argwhere(crop_img>clip)
     marks = np.median(pixels,0)
     no_pixels = np.sum(np.sum(mask_img))
-    pixel_std = np.std(pixels,axis = 0)
 
     if (no_pixels < 10)| (no_pixels > 340):
         print '*** possible error in laser finding routine ***'
@@ -334,61 +351,20 @@ def find_laser(box,diff) :
             ax[1].imshow(mask_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')        
             plt.show()
             plt.close()       # free up memory
-        else :
-            return
 
-        try:
-            prompt = raw_input('Enter y to retry laser search using entire image : ')
-            if prompt.lower() == 'y' :
-                print '*** re-analyzing  fulliamge for laser location ***'
-
-                ly = 330
-                hy = (Ncols-1)
-                lx = 0
-                hx = (Nrows-1)
-                if diff :
-                    clip = 0.5
-                else :
-                    clip = 0.90
-
-                min_no_pixels = 10
-                if diff :
-                    max_no_pixels = 350
-                    max_avg_distance = 25.0
-                else :
-                    max_no_pixels = 350
-                    max_avg_distance = 25.0
-                window_radius = 100.0
-                possible_error = 0
+        return 1
     
-                crop_img = np.copy(Inten[lx:hx,ly:hy])       
-                crop_row,crop_col = crop_img.shape
-                mask_img = np.copy(crop_img)
-
-                clip = np.max(mask_img)*clip+(1-clip)*np.min(mask_img)
-    
-                mask_img[mask_img<=clip] = 0.0
-                mask_img[mask_img>clip ] = 1.0
-    
-                pixels = np.argwhere(crop_img>clip)
-                marks = np.median(pixels,0)
-                no_pixels = np.sum(np.sum(mask_img))
-                pixel_std = np.std(pixels,axis = 0)
-
-                print '** New results **'
-                print '# of pixs ',no_pixels,' x std ',pixel_std[0],' y std ',pixel_std[1]*Col_scal
-                print 'size of crop image : ',crop_row,',',crop_col
-                print 'Marks : (',marks.shape,'),',marks
-
-            else :
-                print '*** ignoring error message ***'
-        except ValueError:
-            print '*** ignoring error message ***'          
-        
+    pixel_std = np.std(pixels,axis = 0)
+       
     locs = pixels*1.0
     locs[:,1] = locs[:,1]*Col_scal
 
     n_pixels = np.shape(locs)[0]
+
+    if n_pixels < 10 :
+        print 'Laser find error after thresholding. # of pixels < 10 : ',n_pixels
+        return 1
+    
     locs_mat1x = np.outer(locs[:,0],np.ones(n_pixels))
     locs_mat2x = np.transpose(locs_mat1x)
     locs_mat1y = np.outer(locs[:,1],np.ones(n_pixels))
@@ -405,6 +381,14 @@ def find_laser(box,diff) :
 
     laser_pixels = pixels[np.argwhere((pixels[:,2]<max_no_pixels) & (pixels[:,2]>min_no_pixels))]
 
+    nof_pixels = int(np.shape(laser_pixels)[0])
+    if nof_pixels > 0 :
+        avg_dist = np.sum(laser_pixels, axis=0) / nof_pixels
+        error = 0
+    else :
+        print 'Laser find error during pixel distance test. # of pixels = ',nof_pixels
+        return 1
+
     laser_pixels[:,0,3] = laser_pixels[:,0,3] / laser_pixels[:,0,2]
     laser_pixels = laser_pixels[np.argwhere(laser_pixels[:,0,3]< max_avg_distance)]
     
@@ -413,22 +397,15 @@ def find_laser(box,diff) :
     old_laser_row = Laser_row
     old_laser_col = Laser_col
 
-    if (abs(Laser_row-new_laser_row-lx) > Laser_window_row_width) :
+    if (abs(Laser_row-new_laser_row-lx) > Laser_window_row_width) & Confirm_initial_setup :
         possible_error = 1
-    if (abs(Laser_col-new_laser_col-ly) > Laser_window_col_width) :
+    if (abs(Laser_col-new_laser_col-ly) > Laser_window_col_width) & Confirm_initial_setup :
         possible_error = 1
 
     Laser_row = new_laser_row
     Laser_col = new_laser_col
-    nof_pixels = int(np.shape(laser_pixels)[0])
 
-    if nof_pixels > 0 :
-        avg_dist = np.sum(laser_pixels, axis=0)[0,0,3] / nof_pixels
-    else :
-        avg_dist = 0.0
-        possible_error = 1
-
-    if (Eng_mode | possible_error):
+    if (Eng_mode | possible_error) & Diag_mode:
         print '# of pixels {0:d} -> {1:d}, avg. distance = {2:.3f}'.format(int(no_pixels),int(nof_pixels),avg_dist)    
         print 'previous Laser mark (row,col)    : ',old_laser_row,' , ',old_laser_col
         print 'new      Laser mark (row,col   ) : ',(Laser_row+lx),' , ',(Laser_col+ly)
@@ -437,7 +414,7 @@ def find_laser(box,diff) :
         if possible_error :
             print '*** Possible laser find error ***'
 
-        if (Plt_mode | possible_error):
+        if (Plt_mode | possible_error) :
             fig, ax = plt.subplots(nrows = 1, ncols = 2)
             ax[0].imshow(Image[lx:hx,ly:hy], aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')      
             ax[1].set_title('Laser Spot: ('+str(round(Laser_col*Col_scal,1))+','+str(round(crop_row-Laser_row,1))+')')   
@@ -451,10 +428,12 @@ def find_laser(box,diff) :
     if Eng_mode :
         print 'Laser mark : ',Laser_row,' , ',Laser_col
     
-    return
+    return error
 
 def plot_inten_hist(img) :
 
+    global Binary_mask
+    
     (rows,cols) = img.shape
         
     fig, ax = plt.subplots(nrows = 1, ncols = 3)
@@ -476,80 +455,271 @@ def plot_inten_hist(img) :
 
     clip = input('Select clip level for masking Image (0.0 to 1.0) (<0.get_square_im0 for reverse mask): ')
     mask_img = np.copy(img)
+    binary_img = np.copy(img)
+    binary_img = np.zeros(img.shape)
     if clip > 0 :
-        mask_img[mask_img<=clip] = 0.0
+        mask_img[img<=clip] = 0.0
+        binary_img[img>clip]  = 1.0
     else :
-        mask_img[mask_img>= (-clip)] = 1.0
-    
-    fig, ax = plt.subplots(nrows = 1, ncols = 3)
+        mask_img[img>= (-clip)] = 0.0
+        binary_img[img< (-clip)]  = 1.0
         
-    ax[0].set_title('Clipped Image ('+str(clip)+')')
-    ax[0].imshow(mask_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
-    n, bins = np.histogram(mask_img, bins=100)
-    ax[1].set_title('Clipped Hist')
-    ax[1].plot(bins[1:],n)
+    fig, ax = plt.subplots(nrows = 3, ncols = 3)
+     
+    ax[0,0].set_title('Raw Image')
+    ax[0,0].imshow(img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+    n, bins = np.histogram(img, bins=100)
+    ax[0,1].set_title('Inten Hist')
+    ax[0,1].plot(bins[1:],n)
     norm = np.float16(np.add.accumulate(n))/np.sum(n)
-    ax[2].set_title('Cum Hist')
-    ax[2].plot(bins[1:],norm)
+    ax[0,2].set_title('Cum Inten Hist')
+    ax[0,2].plot(bins[1:],norm)
+        
+    ax[1,0].set_title('Clipped Image ('+str(clip)+')')
+    ax[1,0].imshow(mask_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+    n, bins = np.histogram(mask_img, bins=100)
+    ax[1,1].set_title('Clipped Hist')
+    ax[1,1].plot(bins[1:],n)
+    norm = np.float16(np.add.accumulate(n))/np.sum(n)
+    ax[1,2].set_title('Cum Hist')
+    ax[1,2].plot(bins[1:],norm)
+    
+    ax[2,0].set_title('Binary Image ('+str(clip)+')')
+    ax[2,0].imshow(binary_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+    n, bins = np.histogram(binary_img, bins=100)
+    ax[2,1].set_title('Binary Hist')
+    ax[2,1].plot(bins[1:],n)
+    norm = np.float16(np.add.accumulate(n))/np.sum(n)
+    ax[2,2].set_title('Cum Hist')
+    ax[2,2].plot(bins[1:],norm)
+
     plt.show()
     plt.close()       # free up memory
         
     return clip
+
+def plot_smoothed_derivative_img(img) :
+#
+#   img : input image
+#   
+#   Smoothes image that then does an dXdY derivative (mine)
+#
+
+    global Eng_mode, Plt_mode
+    global Diag_mode
+
+    
+    rows,cols = img.shape
+    
+#   smooth the image parameters
+
+#    n_s = input('Type in size of array for smoothing #1: ')
+#    n_s2= input('Type in size of array for smoothing #2: ')
+
+    n_s = 1
+    n_s2 = 3
+
+    if Diag_mode :
+        fig, ax = plt.subplots(nrows = 3, ncols = 3)
+
+        label = 'Raw Image'    
+        ax[0,0].set_title(label)
+        ax[0,0].imshow(img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+        n, bins = np.histogram(img, bins=100)
+        ax[0,1].set_title('Derv Hist')
+        ax[0,1].plot(bins[1:],n)        
+        norm = np.float16(np.add.accumulate(n))/np.sum(n)
+        ax[0,2].set_title('Cummulative Derv Hist')
+        ax[0,2].plot(bins[1:],norm)
+
+        kernel = np.ones([n_s,n_s],dtype=np.float32)/(n_s*n_s)
+        sm_img = cv2.filter2D(np.float32(img),-1,kernel)
+        dx_array = abs(sm_img[:,1:]-sm_img[:,:-1])
+        dy_array = abs(sm_img[1:,:]-sm_img[:-1,:])
+        dXdY_array = dx_array[:-1,:] + dy_array[:,:-1]    
+        label = str(n_s)+'x'+str(n_s)+' Smoothed Derivative Image'    
+        ax[1,0].set_title(label)
+        ax[1,0].imshow(dXdY_array, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+        n, bins = np.histogram(dXdY_array, bins=100)
+        ax[1,1].set_title('Derv Hist')
+        ax[1,1].plot(bins[1:],n)        
+        norm = np.float16(np.add.accumulate(n))/np.sum(n)
+        ax[1,2].set_title('Cummulative Derv Hist')
+        ax[1,2].plot(bins[1:],norm)
+
+    kernel = np.ones([n_s2,n_s2],dtype=np.float32)/(n_s*n_s)
+    sm_img = cv2.filter2D(np.float32(img),-1,kernel) 
+    dx_array = abs(sm_img[:,1:]-sm_img[:,:-1])
+    dy_array = abs(sm_img[1:,:]-sm_img[:-1,:])
+    dXdY_array = dx_array[:-1,:] + dy_array[:,:-1]
+
+    if Diag_mode :
+        label = str(n_s2)+'x'+str(n_s2)+' Smoothed Derivative Image'    
+        ax[2,0].set_title(label)
+        ax[2,0].imshow(dXdY_array, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+        n, bins = np.histogram(dXdY_array, bins=100)
+        ax[2,1].set_title('Derv Hist')
+        ax[2,1].plot(bins[1:],n)        
+        norm = np.float16(np.add.accumulate(n))/np.sum(n)
+        ax[2,2].set_title('Cummulative Derv Hist')
+        ax[2,2].plot(bins[1:],norm)
+
+        plt.show()        
+        plt.close()       # free up memory
+        
+    fig, ax = plt.subplots(nrows = 3, ncols = 3)
+
+    label = 'Raw Image'    
+    ax[0,0].set_title(label)
+    ax[0,0].imshow(img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+    n, bins = np.histogram(img, bins=100)
+    ax[0,1].set_title('Derv Hist')
+    ax[0,1].plot(bins[1:],n)        
+    norm = np.float16(np.add.accumulate(n))/np.sum(n)
+    ax[0,2].set_title('Cummulative Derv Hist')
+    ax[0,2].plot(bins[1:],norm)
+      
+    label = str(n_s2)+'x'+str(n_s2)+' Smoothed Derivative Image'    
+    ax[1,0].set_title(label)
+    ax[1,0].imshow(dXdY_array, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+    n, bins = np.histogram(dXdY_array, bins=100)
+    ax[1,1].set_title('Derv Hist')
+    ax[1,1].plot(bins[1:],n)        
+    norm = np.float16(np.add.accumulate(n))/np.sum(n)
+
+    clip1 = bins[np.min(np.argwhere(norm>=0.8))]
+    print 'Clip level for top 20% of derv. values : {0:.2f}'.format(clip1)
+    clip2 = bins[np.min(np.argwhere(norm>=0.85))]
+    print 'Clip level for top 15% of derv. values : {0:.2f}'.format(clip2)
+    clip3 = bins[np.min(np.argwhere(norm>=0.9))]
+    print 'Clip level for top 10% of derv. values : {0:.2f}'.format(clip3)
+    
+#    clip1 = input('Select clip level #1 for masking smoothed derivative Image #2 (0.0 to 1.0) (<0.0 for reverse mask): ')
+#    clip2 = input('Select clip level #2 for masking smoothed derivative Image #2 (0.0 to 1.0) (<0.0 for reverse mask): ')
+#    clip3 = input('Select clip level #3 for masking smoothed derivative Image #2 (0.0 to 1.0) (<0.0 for reverse mask): ')
+
+    
+    ax[1,2].set_title('Cummulative Derv Hist')
+    ax[1,2].plot(bins[1:],norm)
+
+    mask_img = np.copy(dXdY_array)
+    if clip1 > 0 :
+        mask_img[dXdY_array<=clip1] = 0.0
+        mask_img[dXdY_array>clip1]  = 1.0
+    else :
+        mask_img[dXdY_array>= (-clip1)] = 1.0   
+        mask_img[dXdY_array> (-clip1)]  = 0.0
+    label = '20 % Clip : '+str(clip1)
+    ax[2,0].set_title(label)
+    ax[2,0].imshow(mask_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+    
+    mask_img = np.copy(dXdY_array)
+    if clip2 > 0 :
+        mask_img[dXdY_array<=clip2] = 0.0
+        mask_img[dXdY_array>clip2]  = 1.0
+    else :
+        mask_img[dXdY_array>= (-clip2)] = 1.0   
+        mask_img[dXdY_array> (-clip2)]  = 0.0
+    label = '15% Clip : '+str(clip2) 
+    ax[2,1].set_title(label)
+    ax[2,1].imshow(mask_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+    
+    mask_img = np.copy(dXdY_array)
+    if clip3 > 0 :
+        mask_img[dXdY_array<=clip3] = 0.0
+        mask_img[dXdY_array>clip3]  = 1.0
+    else :
+        mask_img[dXdY_array>= (-clip3)] = 1.0   
+        mask_img[dXdY_array> (-clip3)]  = 0.0
+    label = '10% Clip : '+str(clip3)  
+    ax[2,2].set_title(label)
+    ax[2,2].imshow(mask_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+
+    plt.show()
+    plt.close()       # free up memory
+
+    return 
 
 
 def plot_derivative_img(img,der_type) :
 #
 #   img : input image
 #   der_type : type of derivative to perform on image
+#           0 : plot all types
+#           1 : Laplacian
+#           2 : Adaptive Gausssian
+#           3 : dXdY (mine)
 #
 
     global Eng_mode, Plt_mode
+
+
+    fig, ax = plt.subplots(nrows = 3, ncols = 3)
     
     rows,cols = img.shape
 #    print 'Size of img : ',img.shape
 
-    if der_type == 1 :  #   perform Laplacian gradient of the image
-        img_scal = np.int16((img - np.min(img))/(np.max(img)-np.min(img))*255)
-        dXdY_array = cv2.Laplacian(img_scal,cv2.CV_16S)
-        dXdY_array = np.absolute(dXdY_array)
-        label = 'Absolute Laplacian Image'
+#   perform Laplacian gradient of the image
+    img_scal = np.int16((img - np.min(img))/(np.max(img)-np.min(img))*255)
+    dXdY_array = cv2.Laplacian(img_scal,cv2.CV_16S)
+    dXdY_array = np.absolute(dXdY_array)
+    label = 'Absolute Laplacian Image'
 #        dXdY_array = np.absolute((dXdY_array - np.min(dXdY_array))/(np.max(dXdY_array)-np.min(dXdY_array)))
 #        label = 'Laplacian Image'
-        rows,cols = dXdY_array.shape
-    elif der_type == 2 : #   perform Adaptive Gaussian Thresholding of the image
-        img_scal = np.uint8((img - np.min(img))/(np.max(img)-np.min(img))*255)
-        img_scal = cv2.medianBlur(img_scal,3)
-        dXdY_array = cv2.adaptiveThreshold(img_scal,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
-            cv2.THRESH_BINARY,5,2)
-        rows,cols = dXdY_array.shape
-        label = 'Adapt Gaussian Thresh Image'
-    else :              # my x-y derivative
-        dx_array = abs(img[:,1:]-img[:,:-1])
-        dy_array = abs(img[1:,:]-img[:-1,:])
-        dXdY_array = dx_array[:-1,:] + dy_array[:,:-1]
+    rows,cols = dXdY_array.shape
+    ax[0,0].set_title(label)
+    ax[0,0].imshow(dXdY_array, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+
+    n, bins = np.histogram(dXdY_array, bins=100)
+    ax[0,1].set_title('Derv Hist')
+    ax[0,1].plot(bins[1:],n)
+        
+    norm = np.float16(np.add.accumulate(n))/np.sum(n)
+    ax[0,2].set_title('Cummulative Derv Hist')
+    ax[0,2].plot(bins[1:],norm)
+#   perform Adaptive Gaussian Thresholding of the image
+    img_scal = np.uint8((img - np.min(img))/(np.max(img)-np.min(img))*255)
+    img_scal = cv2.medianBlur(img_scal,3)
+    dXdY_array = cv2.adaptiveThreshold(img_scal,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
+        cv2.THRESH_BINARY,5,2)
+    rows,cols = dXdY_array.shape
+    label = 'Adapt Gaussian Thresh Image'
+    ax[1,0].set_title(label)
+    ax[1,0].imshow(dXdY_array, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
+
+    n, bins = np.histogram(dXdY_array, bins=100)
+    ax[1,1].set_title('Derv Hist')
+    ax[1,1].plot(bins[1:],n)
+        
+    norm = np.float16(np.add.accumulate(n))/np.sum(n)
+    ax[1,2].set_title('Cummulative Derv Hist')
+    ax[1,2].plot(bins[1:],norm)
+# my x-y derivative
+    dx_array = abs(img[:,1:]-img[:,:-1])
+    dy_array = abs(img[1:,:]-img[:-1,:])
+    dXdY_array = dx_array[:-1,:] + dy_array[:,:-1]
 #        dx_sum = np.array([np.arange(cols-1),np.sum(dx_array,0)]).T
 #        dy_sum = np.array([np.arange(rows-1),np.sum(dy_array,1)]).T
-        label = 'Derivative Image'
+    label = 'Derivative Image'                
+    ax[2,0].set_title(label)
+    ax[2,0].imshow(dXdY_array, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
 
-
-    if Plt_mode :
-        fig, ax = plt.subplots(nrows = 1, ncols = 3)
-                
-        ax[0].set_title(label)
-        ax[0].imshow(dXdY_array, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
-
-        n, bins = np.histogram(dXdY_array, bins=100)
-        ax[1].set_title('Derv Hist')
-        ax[1].plot(bins[1:],n)
+    n, bins = np.histogram(dXdY_array, bins=100)
+    ax[2,1].set_title('Derv Hist')
+    ax[2,1].plot(bins[1:],n)
         
-        norm = np.float16(np.add.accumulate(n))/np.sum(n)
-        ax[2].set_title('Cummulative Derv Hist')
-        ax[2].plot(bins[1:],norm)
-        
-        plt.show()
-        plt.close()       # free up memory
+    norm = np.float16(np.add.accumulate(n))/np.sum(n)
+    ax[2,2].set_title('Cummulative Derv Hist')
+    ax[2,2].plot(bins[1:],norm)
+  
+    plt.show()
+    plt.close()       # free up memory
 
-        clip = input('Select clip level for masking derivative Image (0.0 to 1.0) (<0.0 for reverse mask): ')
+    clip = 0.0
+
+    return clip
+
+'''        clip = input('Select clip level for masking derivative Image (0.0 to 1.0) (<0.0 for reverse mask): ')
         mask_img = np.copy(dXdY_array)
         if clip > 0 :
             mask_img[mask_img<=clip] = 0.0
@@ -568,9 +738,7 @@ def plot_derivative_img(img,der_type) :
         ax[2].plot(bins[1:],norm)
 
         plt.show()
-        plt.close()       # free up memory        
-
-    return clip
+        plt.close() '''    
 
 
 def crop_img(low_x,low_y,hi_x,hi_y) :
@@ -600,8 +768,12 @@ def update_chess_board(init) :
 #
 #   updates the chess board position
 #
-#   init <> 0 : then initialize the board to starting chess position without analyzing
-#         = 0 : then analyze chess board image and determine chess position
+#   init =  0 : analyze chess board image and determine chess position
+#           1 : initialize the board to starting chess position
+#           2 : initialize the board by moving starting position 2 ranks forward
+#           3 : initialize the board by rotating starting position by clockwise 90 deg
+#           4 : initialize the board by rotating starting position by counter clockwise 90 deg
+#           5 : blank board with no pieces
 #
 
     global Chess_board
@@ -611,17 +783,37 @@ def update_chess_board(init) :
     rank_list = '12345678'
     chess_pc  = [5,3,4,6,7,4,3,5]
 
-    if init <> 0 :
+    if init == 0 :
         capture_image(0,'board','all_scale')
 
     for f in range(8) :
         for r in range(8):
-            if init :
-                if r in [2,3,4,5] : code = [1,1]
-                elif r == 0 : code = [2,chess_pc[f]]
-                elif r == 7 : code = [3,chess_pc[f]]
-                elif r == 1 : code = [2,2]
-                else        : code = [3,2] 
+            if init == 1 :      # starting chess position
+                if r in [2,3,4,5] : code = [0,1]
+                elif r == 0 : code = [1,chess_pc[f]]
+                elif r == 7 : code = [2,chess_pc[f]]
+                elif r == 1 : code = [1,2]
+                else        : code = [2,2] 
+            elif init == 2 :    # move all pieces two ranks forward
+                if r in [0,1,6,7] : code = [0,1]
+                elif r == 2 : code = [1,chess_pc[f]]
+                elif r == 5 : code = [2,chess_pc[f]]
+                elif r == 3 : code = [1,2]
+                else        : code = [2,2] 
+            elif init == 3 :    # rotate all chess chess piece positons by 90 deg clockwise
+                if f in [2,3,4,5] : code = [0,1]
+                elif f == 0 : code = [1,chess_pc[r]]
+                elif f == 7 : code = [2,chess_pc[r]]
+                elif f == 1 : code = [1,2]
+                else        : code = [2,2] 
+            elif init == 4 :    # rotate all chess chess piece positons by 90 deg counter clockwise
+                if f in [2,3,4,5] : code = [0,1]
+                elif f == 7 : code = [1,chess_pc[r]]
+                elif f == 0 : code = [2,chess_pc[r]]
+                elif f == 6 : code = [1,2]
+                else        : code = [2,2] 
+            elif init == 5 :    # no pieces on board
+                code = [0,1]
             else :
                 sq = file_list[f] + rank_list[r]
                 code = get_square_image(sq,0)       # image processing routine
@@ -692,6 +884,7 @@ def calibrate_board():
     global Board_O
     global Laser_window_col_width
     global Laser_window_row_width
+    global Confirm_initial_setup
 
 
     (rows,cols) = Inten.shape
@@ -871,17 +1064,17 @@ def calibrate_board():
         plt.imshow(board_img, aspect='equal', extent=[0,cols*Col_scal,0,rows], cmap='gray')
         plt.show()
         plt.close()       # free up memory
-    plt.imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
-    plt.show()
-    plt.close()       # free up memory
+    if Confirm_initial_setup | Plt_mode :
+        plt.imshow(crop_img, aspect='equal', extent=[0,crop_col*Col_scal,0,crop_row], cmap='gray')
+        plt.show()
+        plt.close()       # free up memory
 
     update_chess_board(0)
-    print_chess_board()
 #
 #   image box size to search around previous known location of laser
 #
-    Laser_window_col_width = int(round(3.0/Col_inches,0))
-    Laser_window_row_width = int(round(3.0/Row_inches,0))
+    Laser_window_col_width = int(round(4.0/Col_inches,0))
+    Laser_window_row_width = int(round(4.0/Row_inches,0))
         
     return
 
@@ -901,7 +1094,7 @@ def get_square_image(square,show_img) :
     file_list = 'abcdefgh'
     rank_list = '12345678'
     error = 0
-    r_bord = 8      # row border
+    r_bord = 11      # row border
     c_bord = int(r_bord/Col_scal+0.5)      # col border
 
     square = square.lower()
@@ -951,7 +1144,6 @@ def get_square_image(square,show_img) :
 
     if error :
         print 'Invalid chess square : ',square
-        crol_img = Inten
         code = [0,0]
 
     return code
@@ -972,19 +1164,19 @@ def determine_chess_piece(sq) :
 #
 #   analysis image to determine the following
 #
-#   Code    =  [1,1] : no pieces or objects on the square
+#   Code    =  [0,1] : no pieces or objects on the square
 #           =  [0,0] : cannot determine identity of object
-#           =  [2,0] : white chess piece on square but cannot determine identity
-#           =  [3,0] : black chess piece on square but cannot determine identity
-#           =  [2,n] or [3,n] : where n = 7 for King, 6 for Queen, 5 for Rook
+#           =  [1,0] : white chess piece on square but cannot determine identity
+#           =  [2,0] : black chess piece on square but cannot determine identity
+#           =  [1,n] or [2,n] : where n = 7 for King, 6 for Queen, 5 for Rook
 #                               4 for Bishop, 3 for Knight and 2 for Pawn
 #
 #   Use various features of image to determine what chess piece is in the image
 #
-#   Img_feat[0,0] : chess piece color (1: white, 0: black)
+#   Img_feat[0,0] : chess piece color (1: white, 2: black)
 #   Img_feat[0,1] : chess piece (1:empty, 2: pawn, 3: knight, 4: bishop, 5:rook, 6: queen, 7: king)
 #   Img_feat[0,2] : chess square (11 : a1, 12:a2, 21: b1, etc up to 88: h8)
-#   Img_feat[0,3] : color of chess square (1: white, 0: black)
+#   Img_feat[0,3] : color of chess square (1: white, 2: black)
 #   Img_feat[0,4] : radial distance of mid point of square to center of chess board (in inches)
 #   Img_feat[0,5] : angle of radial line with the X-axis (chess file direction or image row direction)
 #   Img_feat[0,6] : mean intensity of image
@@ -1006,9 +1198,12 @@ def determine_chess_piece(sq) :
     global Eng_mode, Plt_mode
     global Img_feat, Img_feat_header
     global Log_fname, Feat_log
+    global Chess_board
+    global Create_feature_log
 
     
-    empty_th  = 0.10
+    empty_slope  = -1.556
+    empty_inter  = 0.56
     low_kurt  = 20.0
     high_kurt = 120.0
     bk_pawn_kurt = 160.0
@@ -1027,15 +1222,24 @@ def determine_chess_piece(sq) :
     file_n = file_list.index(sq[0])
     rank_n = rank_list.index(sq[1])
 
+    Img_feat[0,0] = Chess_board[file_n][rank_n][0] 
+    Img_feat[0,1] = Chess_board[file_n][rank_n][1]
     Img_feat[0,2] = (file_n+1)*10 + rank_n + 1
 
     if (sq[0] in ['a','c','e','g']) & (sq[1] in ['1','3','5','7']) :        # dark square
-        Img_feat[0,3] = 0.0
+        Img_feat[0,3] = 2.0
     elif (sq[0] in ['b','d','f','h']) & (sq[1] in ['2','4','6','8']) :      # dark square
-        Img_feat[0,3] = 0.0
+        Img_feat[0,3] = 2.0
     else :                                                                  # light square
         Img_feat[0,3] = 1.0
-    
+
+    Img_feat[0,4] = ((file_n - 3.5)**2+(rank_n - 3.5)**2)**0.5*1.5
+    Img_feat[0,5] = math.atan( (file_n-3.5)/(3.5-rank_n) ) / math.pi * 180.0
+    if rank_n > 3.5 :
+        if file_n > 3.5:
+            Img_feat[0,5] += 180.0
+        else :
+            Img_feat[0,5] += -180.0
     Img_feat[0,6] = inten_avg = np.mean(Sq_img)
     Img_feat[0,7] = inten_dev = np.std(Sq_img)
     Img_feat[0,8] = inten_kurt = get_kurtosis(Sq_img)
@@ -1054,26 +1258,30 @@ def determine_chess_piece(sq) :
     Img_feat[0,11] = norm_kurt
     Img_feat[0,12] = norm_range
 
-    if norm_dev < empty_th :        # square must be empty
-        code = [1,1]
-    elif Img_feat[0,3] == 0 :       # dark square
+    if norm_dev < (inten_range-empty_inter)/empty_slope :        # square must be empty
+        if inten_range < (norm_dev*empty_slope+empty_inter) :
+            code = [0,1]
+    elif Img_feat[0,3] == 2 :       # dark square
         if norm_kurt < low_kurt :
-            code = [3,0]                # piece is dark
+            code = [2,0]                # piece is dark
             if norm_range < bk_pawn_range :
-                code = [3,2]            # piece is a dark pawn
+                code = [2,2]            # piece is a dark pawn
         else :
-            code = [2,0]                # piece is light
+            code = [1,0]                # piece is light
             if norm_dev < wh_pawn_dev :
-                code = [2,2]            # piece is a light pawn
+                code = [1,2]            # piece is a light pawn
     else :
         if norm_kurt > high_kurt :  # light square
-            code = [3,0]                # piece is dark
+            code = [2,0]                # piece is dark
             if inten_kurt > bk_pawn_kurt :
-                code = [3,2]            # piece is a dark pawn
+                code = [2,2]            # piece is a dark pawn
         else :
-            code = [2,0]                # piece is light                
+            code = [1,0]                # piece is light                
             if norm_range < wh_pawn_range :
-                code = [2,2]            # piece is a light pawn
+                code = [1,2]            # piece is a light pawn
+
+    if Create_feature_log :
+        Feat_log = np.append(Feat_log,Img_feat, axis=0)
 
     if Eng_mode :
         print 'Avg. Inten: {0:.3f}, Std. Inten: {1:.3f}, Norm Std: {2:.3f}'.format(inten_avg,inten_dev,norm_dev)
@@ -1087,8 +1295,10 @@ def determine_chess_piece(sq) :
         np.savetxt(Log_fname, Feat_log, fmt='%1.2e',delimiter='\t',header= Img_feat_header)
         
     if Plt_mode :
-        clip = plot_inten_hist(Sq_img)    
-        plot_derivative_img(Sq_img,1)           
+        if Diag_mode :
+            clip = plot_inten_hist(Sq_img)
+        plot_smoothed_derivative_img(Sq_img)
+#        plot_derivative_img(Sq_img,1)           
 
     return code
 
@@ -1156,12 +1366,16 @@ def calibrate_arm_location(prompt, box, static) :
         Inten = (Inten-np.min(Inten))/(np.max(Inten) - np.min(Inten))
         Inten[Inten>1.0] = 1.0
         Inten[Inten<0.0] = 0.0        
-        find_laser(box,1)
+        error = find_laser(box,1)
+        if error <> 0.0 :
+            return error
     else :      
         capture_image(1,'all','laser_scale')
         Image = np.copy(Inten)
-        GPIO.output(22, 0)  # turn off laser
-        find_laser(box,0)
+        GPIO.output(22, 0)  # turn off laser        
+        error = find_laser(box,0)
+        if error <> 0.0 :
+            return error
 
     if Eng_mode :
         print 'Zero row,col  : {0:.3f} , {1:.3f}'.format(Zero_location_row,Zero_location_col)
@@ -1175,7 +1389,7 @@ def calibrate_arm_location(prompt, box, static) :
 #
 #   confirm Z height of laser if prompt option is enabled, otherwise use existing laser_ht information
 #
-    if (prompt) :
+    if prompt & Diag_mode :
         laser_ht = get_z_height_info()
     else :
         laser_ht = Loc_cur[2] + Laser_height_0
@@ -1238,7 +1452,7 @@ def calibrate_arm_location(prompt, box, static) :
         Loc_temp[0] = Magnet_actual_loc[0]
         Loc_temp[1] = Magnet_actual_loc[1]        
 
-    return
+    return 0
 
 def act_on_chesspiece(action, piece) :
 
@@ -1274,7 +1488,7 @@ def act_on_chesspiece(action, piece) :
 
             if (abs(Loc_cur[2]-zloc)> 0.05) :
                 loc = [zloc]
-                move2loc('Z',loc)
+                error = move2loc('Z',loc)
 
         elif (action == 'pickup') | (action == 'place') | (action == 'pickup_cap') :   
 
@@ -1284,7 +1498,7 @@ def act_on_chesspiece(action, piece) :
             
             if (abs(Loc_cur[2]-zloc)> 0.05) :
                 loc = [zloc]
-                move2loc('Z',loc)
+                error = move2loc('Z',loc)
 
             if action == 'pickup' :
                 magnet_on_off(1)
@@ -1302,12 +1516,12 @@ def act_on_chesspiece(action, piece) :
             if Eng_mode :
                 print 'Moving to zloc = {0:.3f} ',zloc        
             loc = [zloc]
-            move2loc('Z',loc)
+            error = move2loc('Z',loc)
               
     else :
         print 'Invalid chess piece : ',piece
                                      
-    return
+    return error
 
 def move2square(square) :
 
@@ -1336,24 +1550,24 @@ def move2square(square) :
 #      In 2 step mode, move 4/5 way to allow recalibration of location and reduce backlash or sticking effects
 
         if Two_step_motion :
-            move2loc('XY',[(4.0*xloc+Loc_cur[0])*0.2,(4.0*yloc+Loc_cur[1])*0.2])
+            error = move2loc('XY',[(4.0*xloc+Loc_cur[0])*0.2,(4.0*yloc+Loc_cur[1])*0.2])
         
 #       then move to actual location
         
         loc = [xloc,yloc]
-        move2loc('XY',loc)
+        error = move2loc('XY',loc)
 
         if Laser_backlash_correction :
             count = 0
             while ((abs(xloc-Loc_cur[0])>0.0625) | (abs(yloc-Loc_cur[1])>0.0625)) & (count < 10) :    
                 print 'Backlash correct #',(count+1)
-                move2loc('XY',[(4.0*xloc+Loc_cur[0])/5.0,(yloc*4.0+Loc_cur[1])/5.0])  # adjust position for backlash
+                error = move2loc('XY',[(9.0*xloc+Loc_cur[0])/10.0,(yloc*9.0+Loc_cur[1])/10.0])  # adjust position for backlash
                 count += 1
                 
     else :
         print 'Invalid chess square : ',square    
                                      
-    return
+    return error
 
 def move2loc(axis, loc) :
     
@@ -1455,15 +1669,18 @@ def move2loc(axis, loc) :
 #
 #       wait till arm has reached target location for x and y motion only 
 #
+    start_time = time.clock()
     if waitxy :
-        print 'Waiting for XY motion to complete',
 
-        max_motion_time = abs(Loc_cur[0]-Loc_pre[0])/Slew_rate[0] + abs(Loc_cur[1]-Loc_pre[1])/Slew_rate[1] + 2.0
-#        max_motion_time *= 0.5
-        dx_thres = abs(Loc_cur[0]-Loc_pre[0])*0.5
-        dy_thres = abs(Loc_cur[1]-Loc_pre[1])*0.5
-        
-        start_time = time.clock()
+        # estimate slew time
+        max_motion_time = max(abs(Loc_cur[0]-Loc_pre[0])/Slew_rate[0], abs(Loc_cur[1]-Loc_pre[1])/Slew_rate[1])
+        if max_motion_time > 10.0 :
+            max_motion_time *= 1.2
+        else :
+            max_motion_time += 2.0
+
+        print 'Waiting {0:.1f} secs for XY motion to complete'.format(max_motion_time),
+                
         time_count = 0.0
         motion = 1
         last_x_loc = Loc_cur[0]
@@ -1472,44 +1689,57 @@ def move2loc(axis, loc) :
         Loc_temp[1] = 0.0
 
         if Eng_mode :
-            print 'dx_thres: {0:.2f}, dy_thres: {1:.2f}'.format(dx_thres,dy_thres)
             print 'Loc_cur : {0:.2f}, {1:.2f} Loc_temp : {2:.2f}, {3:.2f}'.format(Loc_cur[0],Loc_cur[1],Loc_temp[0],Loc_temp[1])
 
-#   make sure motion has started by checking on laser location to insure motion as occured
+        print '.',
+        time.sleep(3)       # wait to make sure motion has started
+        
+#        print 'Time count : {0:.2f}'.format((time.clock() - start_time)*1.5)
 
-        while ( (abs(Loc_cur[0]-Loc_temp[0])> dx_thres) | (abs(Loc_cur[1]-Loc_temp[1])> dy_thres) ) & (time_count < max_motion_time) :
-            
-            calibrate_arm_location(0,1,0)
-            
-            if Eng_mode :
-                print 'moving to target loc: ({0:.3f}->{1:.3f}),({2:.3f}->{3:.3f})'.format(Loc_cur[0],Loc_cur[0],Loc_cur[1],Loc_cur[1])
-            else :
-                print '.',
-
-            time.sleep(1)
-            time_count = (time.clock()-start_time)*1.0
-
-        if (time_count > max_motion_time) & Eng_mode :
-            print '*** move timed out ***'
-            print 'Failed move from current loc to target loc: ({0:.2f}->{1:.2f}),({2:.2f}->{3:.2f})'.format(Loc_cur[0],Loc_cur[0],Loc_cur[1],Loc_cur[1])
-            print 'in {0:.3f} seconds.'.format(time_count)
-
-#   insure motion has completed by seeing if laser is moving
+        #   motion has completed when laser location no longer changes
+        #   if there is an error in detecting laser during motion, then use estimated slew time to determine whether motion has completed
 
         last_x_loc = Loc_temp[0]
         last_y_loc = Loc_temp[1]
         while motion :
-            calibrate_arm_location(0,1,0)
-            if (abs(last_x_loc-Loc_temp[0])<0.05) & (abs(last_y_loc-Loc_temp[1])<0.05) :
-                motion = 0
-            last_x_loc = Loc_temp[0]
-            last_y_loc = Loc_temp[1]
-            print '+',
+            error = calibrate_arm_location(0,1,0)
+            time_count = (time.clock() - start_time)*1.5     # used 78.9 when tested outside
+#           print 'Time count : {0:.2f}'.format(time_count)
+            if error :
+                print 'o',
+                if (time_count > max_motion_time ) :
+                    motion = 0
+                    print 'timed out at {0:0.1f} secs'.format(time_count),
+            else :
+                if (abs(last_x_loc-Loc_temp[0])<0.05) & (abs(last_y_loc-Loc_temp[1])<0.05) :
+                    motion = 0
+                last_x_loc = Loc_temp[0]
+                last_y_loc = Loc_temp[1]
+                print '+',
                         
-        calibrate_arm_location(0,1,1)
-#        Loc_cur[0] = Loc_temp[0]
-#        Loc_cur[1] = Loc_temp[1]
-
+        if error :
+            # make sure no motion is still occuring by looking at image where laser was supposed to have been
+            motion = 1
+            capture_image(0,'all','no_scale')
+            ref_img = np.copy(Inten)
+            ref_row,ref_col = ref_img.shape
+            while motion :
+                time.sleep(2)
+                capture_image(0,'all','no_scale')
+                test_img = np.copy(Inten)
+                diff_img = np.copy (test_img-ref_img)
+                img_dif_res = abs(np.sum(diff_img, dtype=float))
+                ref_sum = abs(np.sum(ref_img, dtype = float))                        
+                ref_img = np.copy(test_img)             
+                if (img_dif_res/ref_sum) < 0.001 :
+                    motion = 0
+            
+            error = calibrate_arm_location(0,0,1)       # look over entire camera view to find laser location
+            if error <> 0 :
+                error = calibrate_arm_location(0,1,1)       # look over laser location to confirm
+        else :
+            error = calibrate_arm_location(0,1,1)       # if no error, look only around last laser location
+            
         print ' '    
         print '** motion completed **',
         if Eng_mode :
@@ -1519,7 +1749,7 @@ def move2loc(axis, loc) :
     else :
         print 'Waiting for Z motion to complete ',
         
-        max_motion_time = abs(zloc-Loc_pre[2])/Slew_rate[2] + 10
+        max_motion_time = abs(zloc-Loc_pre[2])/Slew_rate[2] + 3
         time_count = 0.0
         motion = 1
         capture_image(0,'all','no_scale')
@@ -1529,15 +1759,16 @@ def move2loc(axis, loc) :
         if ((Loc_cur[0]-6.0)**2 + (Loc_cur[1]-6.0)**2)< 4.0 :
             image_jitter = 0.0005           # for locations beneath camera, smaller jitter threshold for lack of Z motion
         elif ((Loc_cur[0]-6.0)**2 + (Loc_cur[1]-6.0)**2)> 16.0 :
-            image_jitter = 0.002           # for locations far from underneath camera, larger jitter threshold for lack of Z motion            
+            image_jitter = 0.0005           # for locations far from underneath camera, larger jitter threshold for lack of Z motion            
         else :
-            image_jitter = 0.001
+            image_jitter = 0.0005
 
-        time.sleep(3)           # wait for arm to start moving
-        start_time = time.clock()
+        error = 0
         
         while motion :
+            time.sleep(3)
             capture_image(0,'all','no_scale')
+            time_count = (time.clock()-start_time)*1.5
             test_img = np.copy(Inten[Laser_box_row_min:Laser_box_row_max,Laser_box_col_min:Laser_box_col_max])
             diff_img = np.copy (test_img-ref_img)
             img_dif_res = abs(np.sum(diff_img, dtype=float))
@@ -1555,37 +1786,29 @@ def move2loc(axis, loc) :
                 plt.show()
                 plt.close()       # free up memory
             
-            ref_img = np.copy(test_img)
-            
-            time_count = (time.clock()-start_time)*60.0
-            time.sleep(1)
-            
-             
+            ref_img = np.copy(test_img)            
+                          
             if (img_dif_res/ref_sum) < image_jitter :
-                motion = 0
-
+                motion = 0                
+                
             if Eng_mode :
                 print 'moving to target zloc: ({0:.3f}->{1:.3f})'.format(Loc_cur[2],zloc)
                 print 'Ref sum : {0:.3f}, Diff sum : {1:.3f}, Diff/Ref : {2:.5f}'.format(ref_sum,img_dif_res,img_dif_res/ref_sum)
             else :
                 print '%',
+                                        
+            if (time_count > max_motion_time) :
+                motion = 0
+                print 'timed out ',
                 
-   #         print 'Time count : {0:.1f},  Max count : {1:.1f}'.format(time_count,max_motion_time)
-            
-   #         if (time_count > max_motion_time) :
-   #             motion = 0
-
-   #     if (time_count > max_motion_time) :
-   #         print '*** move timed out ***'
-   #         print 'Failed move to target zloc ({0:.3f}->{1:.3f}) within {2:.3f} seconds'.format(Loc_cur[2],zloc, time_count)
-                        
         print ' '    
         print '** motion completed **',
         if Eng_mode :
             print ' New loc : ({0:.2f}, {1:.2f}, {2:.2f})'.format(Loc_cur[0],Loc_cur[1],Loc_cur[2])
         else :
             print ' '
-    return
+        
+    return error
 
 def go2home_loc()   :
 #
@@ -1606,6 +1829,11 @@ def chess_move(move,black_pc)    :
 #             Qd1xBh4  queen capture bishop on h4 square by first removing
 #                       piece on h4 square and then moving queen to h4
 #
+#   Haven't coded these commands yet
+#             O-O     king side castling
+#             O-O-O   queenside castling
+#             pd2xpe4 pawn capture by en passent
+#
 
     global Hover_ht, Move_ht, Capture_ht
     global Captured_piece_loc
@@ -1623,7 +1851,7 @@ def chess_move(move,black_pc)    :
         if (Human_manual == 0) | black_pc :
             zloc = Hover_ht - Laser_height_0 - Magnet2laser_offset[2]
             if (abs(Loc_cur[2]-zloc)> 0.05) :
-                move2loc('z',[zloc])
+                error = move2loc('z',[zloc])
             
         p_m = move[0].lower()
         sq0 = move[1:3].lower()
@@ -1634,9 +1862,11 @@ def chess_move(move,black_pc)    :
             if (Human_manual == 0) | black_pc :       
                 move2square(sq1)
                 act_on_chesspiece('pickup_cap',p_c)
-                move2loc('xy', Captured_piece_loc)
-                calibrate_arm_location(1,0,1)
-                move2loc('xy', Captured_piece_loc)
+                error = move2loc('xy', Captured_piece_loc)
+                if error <> 0 :
+                    error = calibrate_arm_location(0,0,1)
+                    if error <> 0 :
+                        error = move2loc('xy', Captured_piece_loc)
                 act_on_chesspiece('place',p_c)
                 Captured_piece_loc[0] -= 1.0
                 if Captured_piece_loc[0]< 0.5 :
@@ -1659,7 +1889,7 @@ def chess_move(move,black_pc)    :
             f = file_list.index(sq0[0])
         if sq0[1] in rank_list :
             r = rank_list.index(sq0[1])        
-        Chess_board[f][r] = [1,1]       # mark square as being empty
+        Chess_board[f][r] = [0,1]       # mark square as being empty
 
         if sq1[0] in file_list :
             f = file_list.index(sq1[0])
@@ -1667,9 +1897,9 @@ def chess_move(move,black_pc)    :
             r = rank_list.index(sq1[1])
         pc = pc_list.index(p_m)+2
         if black_pc :                   # update new location of piece
-            Chess_board[f][r] = [3,pc]
-        else :
             Chess_board[f][r] = [2,pc]
+        else :
+            Chess_board[f][r] = [1,pc]
         
     else :
         print 'Chess move : ('+move+') not recoqnized'
@@ -1791,7 +2021,7 @@ def board_analysis():
     
     prompt = "Analysis Mode Command (? for list of commands) : "
     cmdlst = "List of commands: \n"
-    cmdlst = cmdlst + "    v  : capture new Image and view the full Imaupdate_chess_boardge in intensity scale\n"
+    cmdlst = cmdlst + "    v  : capture new Image and view the full Image in intensity scale\n"
     cmdlst = cmdlst + "    vr  : capture new Image and view the full Imget_square_image in red scale\n"
     cmdlst = cmdlst + "    vg  : capture new Image and view the full Image in green scaled\n"
     cmdlst = cmdlst + "    vb  : capture new Image and view the full Image in blue scaled\n"
@@ -1848,7 +2078,7 @@ def board_analysis():
             hi_y = rows
             crop_img = np.copy(Inten)
         elif (strin.lower() == "chess") :
-            update_chess_board(1)
+            update_chess_board(0)
             print_chess_board()
         elif (strin.lower() == "sq") :
             sq = raw_input('Which square to view and create cropped image (e.g. a6, e8) ? ')
@@ -1858,7 +2088,7 @@ def board_analysis():
             else :
                 print 'Square (',sq,') not recognized'
         elif (strin.lower() == "fl") :
-            find_laser(0,0)
+            error = find_laser(0,0)
         elif(strin.lower() == "l") :
             clip = plot_inten_hist(crop_img)    
         elif (strin.lower() == "c") :
@@ -1993,6 +2223,91 @@ def absolute_coordinate_moves() :
         strin = raw_input (prompt);
     return
 
+def get_user_input() :
+
+    global Eng_mode
+    global Plt_mode
+    global Two_step_motion
+    global Laser_backlash_correction
+    global Talk_mode
+    global Show_Stockfish_Analysis
+    global Confirm_initial_setup
+    
+    try:
+        prompt = raw_input('Enter y to run in Engineering Mode : ')
+        if prompt.lower() == 'y' :
+            Eng_mode = 1
+            try:
+                prompt = raw_input('Enter y to run in Engineering Mode without Plots : ')
+                if prompt.lower() == 'y' :
+                    Plt_mode = 0
+                    print '*** running in Engineering Mode with Plotting Off ***'
+                else :
+                    Plt_mode = 1
+                    print '*** running in Engineering Mode with Plotting On ***'
+            except ValueError:
+                Plt_mode = 1
+                print '*** running in Engineering Mode with Plotting On ***'
+        else :
+            Eng_mode = 0
+            Plt_mode = 0
+    except ValueError:
+        Eng_mode = 0
+        Plt_mode = 0
+
+    try:
+        prompt = raw_input('Enter y to Enable 2 Step Motion : ')
+        if prompt.lower() == 'y' :
+            Two_step_motion = 1
+        else :
+            Two_step_motion = 0
+    except ValueError:    
+        Two_step_motion = 0
+
+    try:
+        prompt = raw_input('Enter y to Disable Correct Backlash with Laser feedback : ')
+        if prompt.lower() == 'y' :
+            Laser_backlash_correction = 0
+        else :
+            Laser_backlash_correction = 1
+    except ValueError:    
+        Laser_backlash_correction = 1
+    
+    try:
+        prompt = raw_input('Enter y to run in Talking Mode : ')
+        if prompt.lower() == 'y' :
+            Talk_mode = 1
+            print '*** running in Talking Mode ***'
+        else :
+            Talk_mode = 0
+    except ValueError:
+        Talk_mode = 0    
+
+    try:
+        prompt = raw_input('Enter y to confirm initial board setup & arm locations: ')
+        if prompt.lower() == 'y' :
+            Confirm_initial_setup = 1
+        else :
+            Confirm_initial_setup = 0
+    except ValueError:    
+        Confirm_initial_setup = 0
+
+    try:
+        prompt = raw_input('Enter y to run in Show Chess Engine Analysis during the game : ')
+        if prompt.lower() == 'y' :
+            Show_Stockfish_Analysis = 1
+            print '*** Will show Stockfish analysis during chess game ***'
+        else :
+            Show_Stockfish_Analysis = 0
+    except ValueError:
+        Show_Stockfish_Analysis = 0
+        
+    if Talk_mode :
+        talk('Hello.   I am Hal the chess playing cyclops')
+        talk('Prepare to be crushed')
+
+    return
+
 #
 #
 #   MAIN PROGRAM
@@ -2003,9 +2318,16 @@ def absolute_coordinate_moves() :
 #   To Run program in diagnostics mode set Eng_mode to 1
 #   For audio feedback set Talk_mode to 1
 #
+Diag_mode = 0
 Eng_mode = 0
 Plt_mode = 0
 Talk_mode = 0
+Create_feature_log = 0
+Confirm_initial_setup = 0
+Two_step_motion = 0
+Laser_backlash_correction = 1
+Show_Stockfish_Analysis = 0
+Binary_mask = 1
 Human_manual = 1    # human will manually make his move
 Human_move = 'pe2-e4'
 Computer_move = 'pe7-e6'
@@ -2115,7 +2437,7 @@ Capture_ht= 4.75                                # ht of magnet above plane of bo
 Slew_rate = [4.0/25.0,4.0/25.0,4.0/25.0]                  # slew rate of x,y,z motion in inches/second
 Captured_piece_loc = [6.0,14.5]
 Chess_board = np.zeros([8,8,2],dtype=int)
-Color_code = 'x.WB'
+Color_code = 'xWB'
 Piece_code = 'x.PNBRQK'
 #   GPIO setup
 #       use board numbering of the GPIO pins
@@ -2171,75 +2493,22 @@ camera.resolution = (Nrows,Ncols)
 
 ser = serial.Serial('/dev/ttyACM0',115200)
 
-try:
-    prompt = raw_input('Enter y to run in Engineering Mode : ')
-    if prompt.lower() == 'y' :
-        Eng_mode = 1
-        try:
-            prompt = raw_input('Enter y to run in Engineering Mode without Plots : ')
-            if prompt.lower() == 'y' :
-                Plt_mode = 0
-                print '*** running in Engineering Mode with Plotting Off ***'
-            else :
-                Plt_mode = 1
-                print '*** running in Engineering Mode with Plotting On ***'
-        except ValueError:
-            Plt_mode = 1
-            print '*** running in Engineering Mode with Plotting On ***'
-    else :
-        Eng_mode = 0
-        Plt_mode = 0
-except ValueError:
-    Eng_mode = 0
-    Plt_mode = 0
 
 try:
-    prompt = raw_input('Enter y to Enable 2 Step Motion : ')
+    prompt = raw_input('Enter y to run in Diagnostic Mode : ')
     if prompt.lower() == 'y' :
-        Two_step_motion = 1
+        Diag_mode = 1
+        get_user_input()
     else :
-        Two_step_motion = 0
-except ValueError:    
-    Two_step_motion = 0
+        Diag_mode = 0
+
+except ValueError :
+    Diag_mode = 0
 
 
-try:
-    prompt = raw_input('Enter y to Disable Correct Backlash with Laser feedback : ')
-    if prompt.lower() == 'y' :
-        Laser_backlash_correction = 0
-    else :
-        Laser_backlash_correction = 1
-except ValueError:    
-    Laser_backlash_correction = 1
-    
-try:
-    prompt = raw_input('Enter y to run in Talking Mode : ')
-    if prompt.lower() == 'y' :
-        Talk_mode = 1
-        print '*** running in Talking Mode ***'
-    else :
-        Talk_mode = 0
-except ValueError:
-    Talk_mode = 0    
-
-try:
-    prompt = raw_input('Enter y to run in Show Chess Engine Analysis during the game : ')
-    if prompt.lower() == 'y' :
-        Show_Stockfish_Analysis = 1
-        print '*** Will show Stockfish analysis during chess game ***'
-    else :
-        Show_Stockfish_Analysis = 0
-except ValueError:
-    Show_Stockfish_Analysis = 0
-        
-if Talk_mode :
-    talk('Hello.   I am Hal the chess playing cyclops')
-    talk('Prepare to be crushed')
-
-prompt = "Main Command (? for list of commands) : "
+main_prompt = "Main Command (? for list of commands) : "
 cmdlst =          "    cal      : auto calibrate board, chess squares and Image scales\n"
 cmdlst = cmdlst + "    arm      : calibrate arm location\n"
-cmdlst = cmdlst + "    ref_b    : refreshed chess board position and prints it\n"
 cmdlst = cmdlst + "    loc      : outputs current location of magnet\n"
 cmdlst = cmdlst + "    mo       : move magnet using abolute coordiates or chess square coordinates\n"
 cmdlst = cmdlst + "    magon    : turn on magnet\n"
@@ -2247,21 +2516,28 @@ cmdlst = cmdlst + "    magoff   : turn off magnet\n"
 cmdlst = cmdlst + "    laseron  : turn on Laser\n"
 cmdlst = cmdlst + "    laseroff : turn off Laser\n"
 cmdlst = cmdlst + "    im       : to capture and save JPG Image\n"
-cmdlst = cmdlst + "    load_log : load a log file for appending feature analysis data\n"
-cmdlst = cmdlst + "    make_log : create a new log file for storing feature analysis data\n"
+cmdlst = cmdlst + "    load_log : load an existing log file for appending new feature analysis data\n"
+cmdlst = cmdlst + "    make_log : create a new log file for storing new feature analysis data\n"
+cmdlst = cmdlst + "    save_log : save the log of image analysis data to previously defined file name\n"
 cmdlst = cmdlst + "    sq_img   : analyze image of chess square & store features in log\n"
+cmdlst = cmdlst + "    train_img: train images for chess piece analysis\n"
 cmdlst = cmdlst + "    anal     : capture Image for manual board analysis\n"
 cmdlst = cmdlst + "    grbl     : enter in GRBL command to CNC\n"
-cmdlst = cmdlst + "    stock    : play chess against Stockfish chess engine\n"
+cmdlst = cmdlst + "    chess    : play chess against Stockfish chess engine\n"
+cmdlst = cmdlst + "    board    : analyze chess board and print board\n"
 cmdlst = cmdlst + "    q        : to quit program"
 
-chess_cmds = "List of chess commands: \n"
-chess_cmds = chess_cmds + "    mxxyy  : chess move xx is initial sq & yy is destentation sq\n"
-chess_cmds = chess_cmds + "             use alg notation for sqs (e.g me2e4 moves pc on e2 to e4\n"
+chess_cmds = "List of chess commands for robot: \n"
+chess_cmds = chess_cmds + "   PZZ-YY  : chess move notation to move piece 'P' on square 'ZZ' to square 'YY'\n"
+chess_cmds = chess_cmds + "             use alg notation for squares (e.g pe2e4 moves pawn on e2 to e4\n"
+chess_cmds = chess_cmds + "   PZZxCYY : chess move notation to capture piece 'C' on square 'YY' \n"
+chess_cmds = chess_cmds + "             with piece 'P' on suare 'ZZ'\n"
+chess_cmds = chess_cmds + "             (e.g bc1xpg5 captures pawn on g5 with bishop on c1\n"
+chess_cmds = chess_cmds + "             'p': pawn,'n': knight,'b': bishop,'r': rook,'q': queen,'k': king\n"
 chess_cmds = chess_cmds + "    n      : start a new chess game\n"   
 chess_cmds = chess_cmds + "    q      : finished chess game, return to main menu\n"
+chess_cmds = chess_cmds + "    ?      : show list of commands\n"
 
-#   view video until quit command is entered for Arduino
 
 time.sleep(2)
 capture_image(0,'all','all_scale')
@@ -2284,16 +2560,38 @@ else :
     calibrate_board()
     calibrate_arm_location(1,0,1)
     calibrate_arm_location(0,1,1)
- 
-print 'Current X,Y,Z location : {0:.3f}, {1:.3f}, {2:.3f}'.format(Loc_cur[0],Loc_cur[1],Loc_cur[2])
-print 'Current Laser location : {0:.3f}, {1:.3f}, {2:.3f}'.format(Laser_actual_loc[0],Laser_actual_loc[1],Laser_actual_loc[2])
-print 'Current Magnet location: {0:.3f}, {1:.3f}, {2:.3f}'.format(Magnet_actual_loc[0],Magnet_actual_loc[1],Magnet_actual_loc[2])        
-    
+
+print ' ' 
+#print 'Current X,Y,Z location : {0:.3f}, {1:.3f}, {2:.3f}'.format(Loc_cur[0],Loc_cur[1],Loc_cur[2])
+#print 'Current Laser location : {0:.3f}, {1:.3f}, {2:.3f}'.format(Laser_actual_loc[0],Laser_actual_loc[1],Laser_actual_loc[2])
+print 'Current Magnet location: {0:.3f}, {1:.3f}, {2:.3f}'.format(Magnet_actual_loc[0],Magnet_actual_loc[1],Magnet_actual_loc[2])
+print ' '
+
+try:
+    prompt = raw_input('Enter y to abort : ')
+    if prompt.lower() == 'y' :
+        abort = 1   # abort game
+    else :
+        abort = 0
+
+except ValueError :
+    abort = 0
+
+
+print_chess_board()
+
+Confirm_initial_setup = 1
+
 camera.start_preview()
 
 Sq_image = np.copy(Inten)
 
-strin = raw_input (prompt);
+# strin = raw_input (main_prompt);
+if abort :
+    strin = 'q'
+else :
+    strin = 'chess'
+
 while (strin.lower() != "q"):
     if (strin.lower() == "im") :
         filename = raw_input ("Name of saved Image file? ")
@@ -2311,7 +2609,12 @@ while (strin.lower() != "q"):
         Feat_log = np.loadtxt(Log_fname,delimiter='\t')
     elif (strin.lower() == "make_log") :
         Log_fname = raw_input('What is name of log file to create? ')
+        Feat_log = np.reshape(np.zeros(20),[1,20])
         np.savetxt(Log_fname, Feat_log, fmt='%1.4e',delimiter='\t',header= Img_feat_header)
+        print 'Log file named '+Log_fname+' created'
+    elif (strin.lower() == "save_log") :
+        np.savetxt(Log_fname, Feat_log, fmt='%1.4e',delimiter='\t',header= Img_feat_header)
+        print 'Log saved to file named : '+Log_fname
     elif (strin.lower() == "sq_img") :
         camera.stop_preview()
         sq = raw_input('Which square to view (e.g. a6, e8) ? ')
@@ -2320,20 +2623,33 @@ while (strin.lower() != "q"):
             
         while len(sq) == 2 :
             capture_image(0,'all','all_scale')
-            code = get_square_image(sq,1)
-            Img_feat[0,0] = input('Color of chess piece (0:black, 1:white) = ')
-            Img_feat[0,1] = input('Chess piece ID (1: empty, 2: pawn, 3: knight, 4: bishop, 5: rook, 6: queen, 7: king) = ')
-            Feat_log = np.append(Feat_log,Img_feat,axis = 0)
-            np.savetxt(Log_fname, Feat_log, fmt='%1.2e',delimiter='\t',header= Img_feat_header)
+            code = get_square_image(sq,0)
+            if Diag_mode :
+                Img_feat[0,0] = input('Color of chess piece (2:black, 1:white) = ')
+                Img_feat[0,1] = input('Chess piece ID (1: empty, 2: pawn, 3: knight, 4: bishop, 5: rook, 6: queen, 7: king) = ')
+                Feat_log = np.append(Feat_log,Img_feat,axis = 0)
+                np.savetxt(Log_fname, Feat_log, fmt='%1.2e',delimiter='\t',header= Img_feat_header)
             sq = raw_input('Which square to view (e.g. a6, e8) ? ')
             
         camera.start_preview()
         Plt_mode = temp_plt_mode
-    elif (strin.lower() == "ref_b") :
+    elif (strin.lower() == "board") :
         camera.stop_preview()
-        update_chess_board(1)
+        update_chess_board(0)
         print_chess_board()
         camera.start_preview()
+    elif (strin.lower() == "train_img") :
+        Create_feature_log = 1
+        chess_pos = input('Enter training position #  (1,2,3,4,5,6) : ')
+        camera.stop_preview()
+        update_chess_board(chess_pos)
+        print_chess_board()
+        inp = raw_input('Setup training position shown and then hit enter')
+        update_chess_board(0)
+        print 'Analzed board position'
+        print_chess_board()
+        camera.start_preview()
+        Create_feature_log = 0
     elif (strin.lower() == "magon") :
         magnet_on_off(1)
     elif (strin.lower() == "magoff") :
@@ -2362,23 +2678,42 @@ while (strin.lower() != "q"):
         if Talk_mode : talk('The current location of the magnet')
         print 'Current X,Y,Z location : {0:.3f}, {1:.3f}, {2:.3f}'.format(Loc_cur[0],Loc_cur[1],Loc_cur[2])
         print 'Current Laser location : {0:.3f}, {1:.3f}, {2:.3f}'.format(Laser_actual_loc[0],Laser_actual_loc[1],Laser_actual_loc[2])
-        print 'Current Magnet location: {0:.3f}, {1:.3f}, {2:.3f}'.format(Magnet_actual_loc[0],Magnet_actual_loc[1],Magnet_actual_loc[2])        
+        print 'Current Magnet location: {0:.3f}, {1:.3f}, {2:.3f}'.format(Magnet_actual_loc[0],Magnet_actual_loc[1],Magnet_actual_loc[2])
     elif (strin.lower() == "grbl") :
         if Talk_mode : talk('Now in direct GRBL command mode')
         strin = raw_input('Type in GRBL command (e.g X5): ')
         ser.write('G91 G0 '+strin+'\r\n')
         reply = ser.readline()
         print 'GRBL Reply back: ',reply,
-    elif (strin.lower() == "stock") :       # initiate chess playing program Stockfish
+    elif (strin.lower() == "chess") :       # initiate chess playing program Stockfish
 
         update_chess_board(1)
+
+        try :            
+            Chess_fname = raw_input('What is name of file to save chess game? ')
+            if Chess_fname == '' :
+                Save_game = 0
+            else :
+                Save_game = 1
+        except ValueError :
+            Save_game = 0
+
+        if Save_game :
+            print 'Game will be saved to : ',Chess_fname
+        else :
+            print 'Game will not be saved'
+
         print ("\n Chess Program \n")
         print chess_cmds
         Skill = "10"
         Movetime = "6000"
         fmove = newgame()
+        move_no = 0
+        Chess_header ='move'+'\t'+'white'+'\t'+'black'
+        Chess_log = ''
         
-        talk('New game started. Please make your first move and best of luck in the game.')
+        talk('New game started.  Reeya   and   Madison,   Please make your first move and best of luck in the game.')
+            
           
         while True:
 
@@ -2388,8 +2723,9 @@ while (strin.lower() != "q"):
             code = B_message[0]
            
     # decide which function to call based on first letter of txt
-            fmove=fmove
+            wmove=fmove
             if code == 'm':
+                move_no += 1
                 chess_move(Human_move,0)            # use CNC to make human move on the board if Human_manual <> 0
                 if Eng_mode :
                     print_chess_board()
@@ -2401,18 +2737,22 @@ while (strin.lower() != "q"):
                     if Eng_mode :
                         print_chess_board()
                     fmove = cmove
-#                if Talk_mode : talk('It is your move. Move carefully!')
                     talk('I have made my move. It is your turn')
+                    Chess_log = np.append(Chess_log,str(move_no)+'\t'+Human_move+'\t'+Computer_move)
+                    if Save_game :
+                        np.savetxt(Chess_fname, Chess_log,fmt = '%s',header= Chess_header)
             elif code == 'n': newgame()
             elif code == '?': print chess_cmds
-            elif code == 'q': break
+            elif code == 'q':
+                break
             else :  sendboard('error at option')
 
-        talk('Thanks for the game. Bye Bye')    
+        talk('Reeya   and   Madison,  Thanks for the game. Bye Bye')    
     else :
         if Talk_mode : talk('Do not understand command' + prompt)
         print prompt
-    strin = raw_input (prompt);                                                             
+        
+    strin = raw_input (main_prompt);                                                             
 
 #   stop camera
 #   release all resource used by camers
